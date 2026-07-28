@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option csharp_namespace = "Interview.Playground.Numbering.Grpc";
+
+package numbering;
+
+service NumberingService {
+  rpc ReserveNumber (ReserveNumberRequest) returns (ReserveNumberResponse);
+}
+
+message ReserveNumberRequest {
+  string document_id = 1;
+  string operation_id = 2;
+}
+
+message ReserveNumberResponse {
+  string number = 1;
+  string status = 2;
+}
