@@ -127,6 +127,31 @@ services:
             - redpanda
             - numbering-grpc
         restart: on-failure
+    
+    api:
+        profiles:
+            - apps
+        image: interview-api:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Api/Dockerfile
+        container_name: interview-api
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+            ConnectionStrings__Redis: redis:6379
+            RabbitMq__HostName: rabbitmq
+            RabbitMq__Port: 5672
+            RabbitMq__UserName: guest
+            RabbitMq__Password: guest
+        ports:
+            - "5268:8080"
+        depends_on:
+            - postgres
+            - redis
+            - rabbitmq
+        restart: on-failure
 
 volumes:
     postgres-data:
