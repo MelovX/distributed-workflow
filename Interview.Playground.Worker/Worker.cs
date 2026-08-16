@@ -1,9 +1,11 @@
 using Interview.Playground.Numbering.Grpc;
+using Interview.Playground.Worker.Configuration;
 using Interview.Playground.Worker.Data;
 using Interview.Playground.Worker.Events;
 using Interview.Playground.Worker.Models;
 using Interview.Playground.Worker.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Text;
@@ -20,27 +22,31 @@ public sealed class Worker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly KafkaDocumentEventPublisher _kafkaPublisher;
     private readonly NumberingService.NumberingServiceClient _numberingClient;
+    private readonly RabbitMqOptions _rabbitMqOptions;
 
     private IConnection? _connection;
     private IChannel? _channel;
 
-    public Worker(IServiceScopeFactory scopeFactory, 
+    public Worker(
+        IServiceScopeFactory scopeFactory, 
         KafkaDocumentEventPublisher documentEventPublisher,
-        NumberingService.NumberingServiceClient numberingServiceClient)
+        NumberingService.NumberingServiceClient numberingServiceClient,
+        IOptions<RabbitMqOptions> rabbitMqOptions)
     {
         _scopeFactory = scopeFactory;
         _kafkaPublisher = documentEventPublisher;
         _numberingClient = numberingServiceClient;
+        _rabbitMqOptions = rabbitMqOptions.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var factory = new ConnectionFactory
         {
-            HostName = "localhost",
-            Port = 5673,
-            UserName = "guest",
-            Password = "guest"
+            HostName = _rabbitMqOptions.HostName,
+            Port = _rabbitMqOptions.Port,
+            UserName = _rabbitMqOptions.UserName,
+            Password = _rabbitMqOptions.Password
         };
 
         _connection = await factory.CreateConnectionAsync(stoppingToken);
