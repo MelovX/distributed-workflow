@@ -88,6 +88,20 @@ services:
             Kafka__GroupId: analytics-service
         depends_on:
             - redpanda
+    
+    numbering-grpc:
+        profiles:
+            - apps
+        image: interview-numbering-grpc:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Numbering.Grpc/Dockerfile
+        container_name: interview-numbering-grpc
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+        ports:
+            - "5082:8080"
 
 volumes:
     postgres-data:
