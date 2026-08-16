@@ -102,6 +102,31 @@ services:
             ASPNETCORE_URLS: http://+:8080
         ports:
             - "5082:8080"
+    
+    worker:
+        profiles:
+            - apps
+        image: interview-worker:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Worker/Dockerfile
+        container_name: interview-worker
+        environment:
+            DOTNET_ENVIRONMENT: Production
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+            RabbitMq__HostName: rabbitmq
+            RabbitMq__Port: 5672
+            RabbitMq__UserName: guest
+            RabbitMq__Password: guest
+            Kafka__BootstrapServers: redpanda:9092
+            Kafka__TopicName: document-registered
+            NumberingGrpc__Address: http://numbering-grpc:8080
+        depends_on:
+            - postgres
+            - rabbitmq
+            - redpanda
+            - numbering-grpc
+        restart: on-failure
 
 volumes:
     postgres-data:
