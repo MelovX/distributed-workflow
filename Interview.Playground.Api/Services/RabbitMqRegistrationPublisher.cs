@@ -1,7 +1,9 @@
-﻿using System.Text;
-using System.Text.Json;
+﻿using Interview.Playground.Api.Configuration;
 using Interview.Playground.Api.Models;
+using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
+using System.Text;
+using System.Text.Json;
 
 
 namespace Interview.Playground.Api.Services
@@ -17,14 +19,16 @@ namespace Interview.Playground.Api.Services
 
         private IConnection? _connection;
 
-        public RabbitMqRegistrationPublisher()
+        public RabbitMqRegistrationPublisher(IOptions<RabbitMqOptions> options)
         {
+            var rabbitMq = options.Value;
+
             _factory = new ConnectionFactory
             {
-                Port = 5673,
-                HostName = "localhost",
-                UserName = "guest",
-                Password = "guest"
+                HostName = rabbitMq.HostName,
+                Port = rabbitMq.Port,
+                UserName = rabbitMq.UserName,
+                Password = rabbitMq.Password
             };
         }
 
