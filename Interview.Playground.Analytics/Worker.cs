@@ -1,33 +1,39 @@
 using Confluent.Kafka;
-using System;
+using Interview.Playground.Analytics.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace Interview.Playground.Analytics;
 
 public sealed class Worker : BackgroundService
 {
-    private const string TopicName = "document-registered";
+    private readonly KafkaOptions _kafkaOptions;
+
+    public Worker(IOptions<KafkaOptions> options)
+    {
+        _kafkaOptions = options.Value;
+    }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         return Task.Run(() => Consume(stoppingToken), stoppingToken);
     }
 
-    private static void Consume(CancellationToken stoppingToken)
+    private void Consume(CancellationToken stoppingToken)
     {
         var config = new ConsumerConfig
         {
-            BootstrapServers = "localhost:19092",
-            GroupId = "analytics-service",
+            BootstrapServers = _kafkaOptions.BootstrapServers,
+            GroupId = _kafkaOptions.GroupId,
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnableAutoCommit = false
         };
 
         using var consumer = new ConsumerBuilder<string, string>(config).Build();
 
-        consumer.Subscribe(TopicName);
+        consumer.Subscribe(_kafkaOptions.TopicName);
 
         Console.WriteLine("Analytics consumer started.");
-        Console.WriteLine($"Topic: {TopicName}");
+        Console.WriteLine($"Topic: {_kafkaOptions.TopicName}");
         Console.WriteLine($"GroupId: {config.GroupId}");
 
         try
