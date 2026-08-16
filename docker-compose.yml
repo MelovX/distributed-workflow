@@ -11,6 +11,12 @@ services:
         ports:
             - "5673:5672"
             - "15672:15672"
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 10s
 
     postgres:
         image: postgres:16
@@ -122,11 +128,15 @@ services:
             Kafka__TopicName: document-registered
             NumberingGrpc__Address: http://numbering-grpc:8080
         depends_on:
-            - postgres
-            - rabbitmq
-            - redpanda
-            - numbering-grpc
-        restart: on-failure
+            postgres:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+            redpanda:
+                condition: service_started
+            numbering-grpc:
+                condition: service_started
+        restart: unless-stopped
     
     api:
         profiles:

@@ -10,6 +10,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Text;
 using System.Text.Json;
+using RabbitMQ.Client.Exceptions;
 
 namespace Interview.Playground.Worker;
 
@@ -23,6 +24,9 @@ public sealed class Worker : BackgroundService
     private readonly KafkaDocumentEventPublisher _kafkaPublisher;
     private readonly NumberingService.NumberingServiceClient _numberingClient;
     private readonly RabbitMqOptions _rabbitMqOptions;
+    private readonly ILogger<Worker> _logger;
+
+    private static readonly TimeSpan RabbitMqRetryDelay = TimeSpan.FromSeconds(5);
 
     private IConnection? _connection;
     private IChannel? _channel;
@@ -31,12 +35,14 @@ public sealed class Worker : BackgroundService
         IServiceScopeFactory scopeFactory, 
         KafkaDocumentEventPublisher documentEventPublisher,
         NumberingService.NumberingServiceClient numberingServiceClient,
-        IOptions<RabbitMqOptions> rabbitMqOptions)
+        IOptions<RabbitMqOptions> rabbitMqOptions,
+        ILogger<Worker> logger)
     {
         _scopeFactory = scopeFactory;
         _kafkaPublisher = documentEventPublisher;
         _numberingClient = numberingServiceClient;
         _rabbitMqOptions = rabbitMqOptions.Value;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -46,10 +52,14 @@ public sealed class Worker : BackgroundService
             HostName = _rabbitMqOptions.HostName,
             Port = _rabbitMqOptions.Port,
             UserName = _rabbitMqOptions.UserName,
-            Password = _rabbitMqOptions.Password
+            Password = _rabbitMqOptions.Password,
+            AutomaticRecoveryEnabled = true,
+            TopologyRecoveryEnabled = true,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+            ClientProvidedName = "interview-registration-worker"
         };
 
-        _connection = await factory.CreateConnectionAsync(stoppingToken);
+        _connection = await ConnectWithRetryAsync(factory, stoppingToken);
         _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
         await _channel.ExchangeDeclareAsync(
@@ -193,6 +203,51 @@ public sealed class Worker : BackgroundService
         Console.WriteLine("Registration worker started.");
 
         await Task.Delay(Timeout.Infinite, stoppingToken);
+    }
+
+    private async Task<IConnection> ConnectWithRetryAsync(
+        ConnectionFactory factory,
+        CancellationToken cancellationToken)
+    {
+        var attempt = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            attempt++;
+
+            try
+            {
+                _logger.LogInformation(
+                    "Connecting to RabbitMQ. Attempt {Attempt}.",
+                    attempt);
+
+                var connection =
+                    await factory.CreateConnectionAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Connected to RabbitMQ on attempt {Attempt}.",
+                    attempt);
+
+                return connection;
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (BrokerUnreachableException exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "RabbitMQ is unavailable. Retrying in {DelaySeconds} seconds.",
+                    RabbitMqRetryDelay.TotalSeconds);
+
+                await Task.Delay(
+                    RabbitMqRetryDelay,
+                    cancellationToken);
+            }
+        }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
