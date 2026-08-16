@@ -72,6 +72,22 @@ services:
             KAFKA_BROKERS: redpanda:9092
             REDPANDA_ADMINAPI_ENABLED: true
             REDPANDA_ADMINAPI_URLS: http://redpanda:9644
+    
+    analytics:
+        profiles:
+            - apps
+        image: interview-analytics:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Analytics/Dockerfile
+        container_name: interview-analytics
+        environment:
+            DOTNET_ENVIRONMENT: Production
+            Kafka__BootstrapServers: redpanda:9092
+            Kafka__TopicName: document-registered
+            Kafka__GroupId: analytics-service
+        depends_on:
+            - redpanda
 
 volumes:
     postgres-data:
