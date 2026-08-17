@@ -79,9 +79,11 @@ builder.Services.AddDbContext<RegistrationDbContext>(options =>
 {
     options.UseNpgsql(registrationDbConnectionString);
 });
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
+app.MapHealthChecks("/health/live");
 app.UseOpenTelemetryPrometheusScrapingEndpoint();
 app.UseSwagger();
 app.UseSwaggerUI();
