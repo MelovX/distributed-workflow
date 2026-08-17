@@ -8,6 +8,34 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var registrationDbConnectionString =
+    builder.Configuration.GetConnectionString("RegistrationDb")
+    ?? throw new InvalidOperationException(
+        "Connection string 'RegistrationDb' is not configured.");
+
+var runMigrations = string.Equals(
+    builder.Configuration["RunMigrations"],
+    "true",
+    StringComparison.OrdinalIgnoreCase);
+
+if (runMigrations)
+{
+    Console.WriteLine("Applying database migrations...");
+
+    var dbContextOptions =
+        new DbContextOptionsBuilder<RegistrationDbContext>()
+            .UseNpgsql(registrationDbConnectionString)
+            .Options;
+
+    await using var dbContext = new RegistrationDbContext(dbContextOptions);
+
+    await dbContext.Database.MigrateAsync();
+
+    Console.WriteLine("Database migrations applied.");
+
+    return;
+}
+
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
@@ -18,13 +46,6 @@ builder.Services.AddOpenTelemetry()
             .AddRuntimeInstrumentation()
             .AddPrometheusExporter();
     });
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-
-var registrationDbConnectionString =
-    builder.Configuration.GetConnectionString("RegistrationDb")
-    ?? throw new InvalidOperationException(
-        "Connection string 'RegistrationDb' is not configured.");
 
 var redisConnectionString =
     builder.Configuration.GetConnectionString("Redis")
