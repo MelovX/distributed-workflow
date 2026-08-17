@@ -11,6 +11,12 @@ services:
         ports:
             - "5673:5672"
             - "15672:15672"
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 10s
 
     postgres:
         image: postgres:16
@@ -23,6 +29,26 @@ services:
             POSTGRES_PASSWORD: postgres
         volumes:
             - postgres-data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres -d registration_db"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 5s
+            
+    migrations:
+        profiles:
+            - apps
+        image: interview-api:local
+        container_name: interview-migrations
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            RunMigrations: "true"
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+        depends_on:
+            postgres:
+                condition: service_healthy
+        restart: "no"
 
     prometheus:
         image: prom/prometheus
@@ -72,6 +98,97 @@ services:
             KAFKA_BROKERS: redpanda:9092
             REDPANDA_ADMINAPI_ENABLED: true
             REDPANDA_ADMINAPI_URLS: http://redpanda:9644
+    
+    analytics:
+        profiles:
+            - apps
+        image: interview-analytics:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Analytics/Dockerfile
+        container_name: interview-analytics
+        environment:
+            DOTNET_ENVIRONMENT: Production
+            Kafka__BootstrapServers: redpanda:9092
+            Kafka__TopicName: document-registered
+            Kafka__GroupId: analytics-service
+        depends_on:
+            - redpanda
+    
+    numbering-grpc:
+        profiles:
+            - apps
+        image: interview-numbering-grpc:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Numbering.Grpc/Dockerfile
+        container_name: interview-numbering-grpc
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+        ports:
+            - "5082:8080"
+    
+    worker:
+        profiles:
+            - apps
+        image: interview-worker:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Worker/Dockerfile
+        container_name: interview-worker
+        environment:
+            DOTNET_ENVIRONMENT: Production
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+            RabbitMq__HostName: rabbitmq
+            RabbitMq__Port: 5672
+            RabbitMq__UserName: guest
+            RabbitMq__Password: guest
+            Kafka__BootstrapServers: redpanda:9092
+            Kafka__TopicName: document-registered
+            NumberingGrpc__Address: http://numbering-grpc:8080
+        depends_on:
+            postgres:
+                condition: service_started
+            migrations:
+                condition: service_completed_successfully
+            rabbitmq:
+                condition: service_healthy
+            redpanda:
+                condition: service_started
+            numbering-grpc:
+                condition: service_started
+        restart: unless-stopped
+    
+    api:
+        profiles:
+            - apps
+        image: interview-api:local
+        build:
+            context: .
+            dockerfile: Interview.Playground.Api/Dockerfile
+        container_name: interview-api
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+            ConnectionStrings__Redis: redis:6379
+            RabbitMq__HostName: rabbitmq
+            RabbitMq__Port: 5672
+            RabbitMq__UserName: guest
+            RabbitMq__Password: guest
+        ports:
+            - "5268:8080"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            migrations:
+                condition: service_completed_successfully
+            redis:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        restart: on-failure
 
 volumes:
     postgres-data:

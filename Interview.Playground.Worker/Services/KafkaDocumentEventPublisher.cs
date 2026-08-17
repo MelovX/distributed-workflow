@@ -1,20 +1,26 @@
 ﻿using Confluent.Kafka;
+using Interview.Playground.Worker.Configuration;
 using Interview.Playground.Worker.Events;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace Interview.Playground.Worker.Services
 {
     public class KafkaDocumentEventPublisher : IDisposable
     {
-        private const string TopicName = "document-registered";
+        private readonly string _topicName;
 
         private readonly IProducer<string, string> _producer;
 
-        public KafkaDocumentEventPublisher()
+        public KafkaDocumentEventPublisher(IOptions<KafkaOptions> options)
         {
+            var kafkaOptions = options.Value;
+
+            _topicName = kafkaOptions.TopicName;
+
             var config = new ProducerConfig
             {
-                BootstrapServers = "localhost:19092",
+                BootstrapServers = kafkaOptions.BootstrapServers,
                 Acks = Acks.All,
                 EnableIdempotence = true
             };
@@ -39,7 +45,7 @@ namespace Interview.Playground.Worker.Services
                 ]
             };
 
-            await _producer.ProduceAsync(TopicName, message, cancellationToken);
+            await _producer.ProduceAsync(_topicName, message, cancellationToken);
         }
 
         public void Dispose()
