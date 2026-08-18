@@ -5,6 +5,7 @@ using Interview.Playground.Api.Metrics;
 using Interview.Playground.Api.Services;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using OpenTelemetry.Metrics;
 using StackExchange.Redis;
 
@@ -83,7 +84,11 @@ builder.Services.AddDbContext<RegistrationDbContext>(options =>
 });
 builder.Services.AddHealthChecks()
     .AddCheck<PostgresHealthCheck>("postgres",
-        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+        failureStatus: HealthStatus.Unhealthy,
+        tags: new[] { "ready" })
+    .AddCheck<RedisHealthCheck>(
+        "redis",
+        failureStatus: HealthStatus.Unhealthy,
         tags: new[] { "ready" });
 
 var app = builder.Build();

@@ -33,7 +33,7 @@ namespace Interview.Playground.Api.HealthChecks
             }
             catch (Exception ex)
             {
-                return HealthCheckResult.Unhealthy(ex.InnerException?.Message, ex);
+                return HealthCheckResult.Unhealthy(ex.Message, ex);
             }
         }
     }
