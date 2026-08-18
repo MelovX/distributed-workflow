@@ -1,8 +1,11 @@
 using Interview.Playground.Api.Configuration;
 using Interview.Playground.Api.Data;
+using Interview.Playground.Api.HealthChecks;
 using Interview.Playground.Api.Metrics;
 using Interview.Playground.Api.Services;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using OpenTelemetry.Metrics;
 using StackExchange.Redis;
 
@@ -79,9 +82,25 @@ builder.Services.AddDbContext<RegistrationDbContext>(options =>
 {
     options.UseNpgsql(registrationDbConnectionString);
 });
+builder.Services.AddHealthChecks()
+    .AddCheck<PostgresHealthCheck>("postgres",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: new[] { "ready" })
+    .AddCheck<RedisHealthCheck>(
+        "redis",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: new[] { "ready" });
 
 var app = builder.Build();
 
+app.MapHealthChecks("/health/ready", new HealthCheckOptions()
+{
+    Predicate = healthCheck => healthCheck.Tags.Contains("ready")
+});
+app.MapHealthChecks("/health/live", new HealthCheckOptions()
+{
+    Predicate = _ => false
+});
 app.UseOpenTelemetryPrometheusScrapingEndpoint();
 app.UseSwagger();
 app.UseSwaggerUI();
