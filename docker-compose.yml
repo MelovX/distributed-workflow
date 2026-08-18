@@ -179,6 +179,12 @@ services:
             RabbitMq__Password: guest
         ports:
             - "5268:8080"
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 15s
         depends_on:
             postgres:
                 condition: service_healthy
