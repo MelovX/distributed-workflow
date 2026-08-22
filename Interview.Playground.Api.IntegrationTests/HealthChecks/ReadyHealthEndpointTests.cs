@@ -1,5 +1,6 @@
 ﻿using Interview.Playground.Api.IntegrationTests.Factories;
 using Interview.Playground.Api.IntegrationTests.Fixtures;
+using Npgsql;
 using System.Net;
 
 namespace Interview.Playground.Api.IntegrationTests.HealthChecks
@@ -39,6 +40,35 @@ namespace Interview.Playground.Api.IntegrationTests.HealthChecks
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal("Healthy", content);
+        }
+
+        [Fact]
+        public async Task Ready_WhenPostgresDatabaseDoesNotExist_ReturnsServiceUnavailable()
+        {
+            // Arrange
+            var connectionStringBuilder = new NpgsqlConnectionStringBuilder(
+                _postgresFixture.Container.GetConnectionString())
+            {
+                Database = "missing_database"
+            };
+
+            using var factory = new ApiWebApplicationFactory(
+                connectionStringBuilder.ConnectionString,
+                _redisFixture.Container.GetConnectionString());
+
+            using var client = factory.CreateClient();
+
+            // Act
+            using var response = await client.GetAsync(
+                "/health/ready",
+                TestContext.Current.CancellationToken);
+
+            var content = await response.Content.ReadAsStringAsync(
+                TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal("Unhealthy", content);
         }
     }
 }
