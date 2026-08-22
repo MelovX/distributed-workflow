@@ -70,5 +70,30 @@ namespace Interview.Playground.Api.IntegrationTests.HealthChecks
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
             Assert.Equal("Unhealthy", content);
         }
+
+        [Fact]
+        public async Task Ready_WhenRedisIsUnavailable_ReturnsServiceUnavailable()
+        {
+            // Arrange
+            var redisConnectionString = "localhost:1,abortConnect=false,connectTimeout=1000,syncTimeout=1000";
+
+            using var factory = new ApiWebApplicationFactory(
+                _postgresFixture.Container.GetConnectionString(),
+                redisConnectionString);
+
+            using var client = factory.CreateClient();
+
+            // Act
+            using var response = await client.GetAsync(
+                "/health/ready",
+                TestContext.Current.CancellationToken);
+
+            var content = await response.Content.ReadAsStringAsync(
+                TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal("Unhealthy", content);
+        }
     }
 }
