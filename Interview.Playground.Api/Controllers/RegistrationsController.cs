@@ -5,6 +5,7 @@ using Interview.Playground.Api.Models;
 using Interview.Playground.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using System.Text.Json;
 
 namespace Interview.Playground.Api.Controllers
@@ -72,7 +73,31 @@ namespace Interview.Playground.Api.Controllers
             await _dbContext.RegistrationOperations.AddAsync(operation, cancellationToken);
             await _dbContext.OutboxMessages.AddAsync(outboxMessage, cancellationToken);
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception)
+                when (exception.InnerException is PostgresException postgresException
+                      && postgresException.SqlState ==
+                         PostgresErrorCodes.UniqueViolation
+                      && postgresException.ConstraintName ==
+                         "IX_RegistrationOperations_IdempotencyKey")
+            {
+                _dbContext.ChangeTracker.Clear();
+
+                var concurrentOperation =
+                    await _dbContext.RegistrationOperations
+                        .AsNoTracking()
+                        .SingleAsync(
+                            operation =>
+                                operation.IdempotencyKey == idempotencyKey,
+                            cancellationToken);
+
+                return Accepted(new RegisterDocumentResponse(
+                    OperationId: concurrentOperation.Id,
+                    Status: concurrentOperation.Status));
+            }
 
             RegistrationMetrics.RegistrationsCreated.Add(1);
 

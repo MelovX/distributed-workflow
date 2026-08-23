@@ -104,5 +104,194 @@ namespace Interview.Playground.Api.IntegrationTests.Registrations
             Assert.Null(outboxMessage.PublishedAt);
             Assert.Equal(0, outboxMessage.Attempts);
         }
+
+        [Fact]
+        public async Task Register_WhenIdempotencyKeyIsRepeated_ReturnsSameOperationAndDoesNotCreateDuplicates()
+        {
+            // Arrange
+            var documentId = "document-123";
+            var title = "Test document";
+            var idempotencyKey = Guid.NewGuid().ToString("N");
+
+            using var factory = new ApiWebApplicationFactory(
+                _fixture.Container.GetConnectionString(),
+                "localhost:1,abortConnect=false");
+
+            using var client = factory.CreateClient();
+
+            var request = new RegisterDocumentRequest(
+                DocumentId: documentId,
+                Title: title);
+
+            using var firstHttpRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                "/registrations");
+
+            firstHttpRequest.Content = JsonContent.Create(request);
+            firstHttpRequest.Headers.Add("Idempotency-Key", idempotencyKey);
+
+            using var secondHttpRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                "/registrations");
+
+            secondHttpRequest.Content = JsonContent.Create(request);
+            secondHttpRequest.Headers.Add("Idempotency-Key", idempotencyKey);
+
+            // Act
+            using var firstResponse = await client.SendAsync(firstHttpRequest,
+                TestContext.Current.CancellationToken);
+
+            using var secondResponse = await client.SendAsync(secondHttpRequest,
+                TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Accepted, firstResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.Accepted, secondResponse.StatusCode);
+
+            var firstContent = await firstResponse.Content.ReadFromJsonAsync<RegisterDocumentResponse>(cancellationToken:
+                TestContext.Current.CancellationToken);
+
+            var secondContent = await secondResponse.Content.ReadFromJsonAsync<RegisterDocumentResponse>(cancellationToken:
+                TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.NotNull(firstContent);
+            Assert.NotNull(secondContent);
+            Assert.NotEmpty(firstContent.OperationId);
+            Assert.NotEmpty(secondContent.OperationId);
+            Assert.Equal("Pending", firstContent.Status);
+            Assert.Equal("Pending", secondContent.Status);
+
+            Assert.Equal(firstContent.OperationId, secondContent.OperationId);
+
+            var options = new DbContextOptionsBuilder<RegistrationDbContext>()
+                .UseNpgsql(_fixture.Container.GetConnectionString())
+                .Options;
+
+            await using var dbContext = new RegistrationDbContext(options);
+
+            var operations = await dbContext.RegistrationOperations
+                .AsNoTracking()
+                .Where(operation =>
+                    operation.IdempotencyKey == idempotencyKey)
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            var operation = Assert.Single(operations);
+
+            Assert.Equal(firstContent.OperationId, operation.Id);
+
+            var outboxMessages = await dbContext.OutboxMessages
+                .AsNoTracking()
+                .Where(message =>
+                    message.Type == nameof(RegisterDocumentCommand))
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            var matchingOutboxMessages = outboxMessages.Where(message =>
+            {
+                var outboxCommand = JsonSerializer.Deserialize<RegisterDocumentCommand>(message.Payload);
+
+                return outboxCommand?.OperationId == firstContent.OperationId;
+            });
+
+            Assert.Single(matchingOutboxMessages);
+        }
+
+        [Fact]
+        public async Task Register_WhenIdempotencyKeyIsSubmittedConcurrently_DoesNotCreateDuplicates()
+        {
+            // Arrange
+            var documentId = "document-123";
+            var title = "Test document";
+            var idempotencyKey = Guid.NewGuid().ToString("N");
+
+            using var factory = new ApiWebApplicationFactory(
+                _fixture.Container.GetConnectionString(),
+                "localhost:1,abortConnect=false");
+
+            using var client = factory.CreateClient();
+
+            var request = new RegisterDocumentRequest(
+                DocumentId: documentId,
+                Title: title);
+
+            using var firstHttpRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                "/registrations");
+
+            firstHttpRequest.Content = JsonContent.Create(request);
+            firstHttpRequest.Headers.Add("Idempotency-Key", idempotencyKey);
+
+            using var secondHttpRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                "/registrations");
+
+            secondHttpRequest.Content = JsonContent.Create(request);
+            secondHttpRequest.Headers.Add("Idempotency-Key", idempotencyKey);
+
+            // Act
+            var firstResponseTask = client.SendAsync(firstHttpRequest,
+                TestContext.Current.CancellationToken);
+
+            var secondResponseTask = client.SendAsync(secondHttpRequest,
+                TestContext.Current.CancellationToken);
+
+            var responses = await Task.WhenAll(
+                firstResponseTask,
+                secondResponseTask);
+
+            using var firstResponse = responses[0];
+            using var secondResponse = responses[1];
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Accepted, firstResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.Accepted, secondResponse.StatusCode);
+
+            var firstContent = await firstResponse.Content.ReadFromJsonAsync<RegisterDocumentResponse>(cancellationToken:
+                TestContext.Current.CancellationToken);
+
+            var secondContent = await secondResponse.Content.ReadFromJsonAsync<RegisterDocumentResponse>(cancellationToken:
+                TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.NotNull(firstContent);
+            Assert.NotNull(secondContent);
+            Assert.NotEmpty(firstContent.OperationId);
+            Assert.NotEmpty(secondContent.OperationId);
+            Assert.Equal("Pending", firstContent.Status);
+            Assert.Equal("Pending", secondContent.Status);
+
+            Assert.Equal(firstContent.OperationId, secondContent.OperationId);
+
+            var options = new DbContextOptionsBuilder<RegistrationDbContext>()
+                .UseNpgsql(_fixture.Container.GetConnectionString())
+                .Options;
+
+            await using var dbContext = new RegistrationDbContext(options);
+
+            var operations = await dbContext.RegistrationOperations
+                .AsNoTracking()
+                .Where(operation =>
+                    operation.IdempotencyKey == idempotencyKey)
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            var operation = Assert.Single(operations);
+
+            Assert.Equal(firstContent.OperationId, operation.Id);
+
+            var outboxMessages = await dbContext.OutboxMessages
+                .AsNoTracking()
+                .Where(message =>
+                    message.Type == nameof(RegisterDocumentCommand))
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            var matchingOutboxMessages = outboxMessages.Where(message =>
+            {
+                var outboxCommand = JsonSerializer.Deserialize<RegisterDocumentCommand>(message.Payload);
+
+                return outboxCommand?.OperationId == firstContent.OperationId;
+            });
+
+            Assert.Single(matchingOutboxMessages);
+        }
     }
 }
