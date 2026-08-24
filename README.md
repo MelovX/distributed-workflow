@@ -193,6 +193,62 @@ docker compose --profile apps down -v
 | Redis | `localhost:6379` |
 | Kafka-compatible endpoint | `localhost:19092` |
 
+## API usage
+
+The registration API accepts a document and returns an operation identifier immediately. Processing continues asynchronously, so clients use the operation identifier to retrieve the current status.
+
+### Register a document
+
+```http
+POST /registrations
+Idempotency-Key: registration-example-001
+Content-Type: application/json
+
+{
+  "documentId": "document-123",
+  "title": "Example document"
+}
+```
+
+| Input | Location | Type | Required | Description |
+|---|---|---|---|---|
+| `Idempotency-Key` | Header | string | Yes | Identifies the logical request. Repeating the same key returns the existing operation instead of creating another one. |
+| `documentId` | JSON body | string | Yes | Identifies the document being registered. |
+| `title` | JSON body | string | Yes | Human-readable document title. |
+
+A valid request returns `202 Accepted` because processing has been queued rather than completed:
+
+```json
+{
+  "operationId": "5103c020dff1475c90d1afbdbf9ccd4d",
+  "status": "Pending"
+}
+```
+
+The API returns `400 Bad Request` when the `Idempotency-Key` header is missing or empty.
+
+### Get registration status
+
+Use the `operationId` returned by the registration request:
+
+```http
+GET /registrations/5103c020dff1475c90d1afbdbf9ccd4d
+Accept: application/json
+```
+
+An existing operation returns `200 OK`:
+
+```json
+{
+  "operationId": "5103c020dff1475c90d1afbdbf9ccd4d",
+  "status": "Succeeded"
+}
+```
+
+The current workflow moves through `Pending`, `InProgress`, and `Succeeded`. An unknown operation identifier returns `404 Not Found`.
+
+Runnable examples are available in [`DistributedWorkflow.Api.http`](DistributedWorkflow.Api/DistributedWorkflow.Api.http) and through Swagger UI at <http://localhost:5268/swagger>.
+
 ## Testing
 
 The repository contains separate unit and integration test projects.

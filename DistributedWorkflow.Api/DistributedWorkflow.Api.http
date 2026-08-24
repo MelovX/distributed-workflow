@@ -1,6 +1,26 @@
 @DistributedWorkflow.Api_HostAddress = http://localhost:5268
+@OperationId = replace-with-operation-id-from-post-response
 
-GET {{DistributedWorkflow.Api_HostAddress}}/weatherforecast/
+### Register a document
+POST {{DistributedWorkflow.Api_HostAddress}}/registrations
+Idempotency-Key: registration-example-001
+Content-Type: application/json
 Accept: application/json
+
+{
+  "documentId": "document-123",
+  "title": "Example document"
+}
+
+### Get the current registration status
+# Copy operationId from the POST response into the OperationId variable above.
+GET {{DistributedWorkflow.Api_HostAddress}}/registrations/{{OperationId}}
+Accept: application/json
+
+### Liveness check
+GET {{DistributedWorkflow.Api_HostAddress}}/health/live
+
+### Readiness check
+GET {{DistributedWorkflow.Api_HostAddress}}/health/ready
 
 ###
