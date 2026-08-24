@@ -2,7 +2,6 @@
 using DistributedWorkflow.Api.Data.Entities;
 using DistributedWorkflow.Api.Metrics;
 using DistributedWorkflow.Api.Models;
-using DistributedWorkflow.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -104,6 +103,32 @@ namespace DistributedWorkflow.Api.Controllers
             return Accepted(new RegisterDocumentResponse(
                 OperationId: command.OperationId,
                 Status: "Pending"));
+        }
+
+        [HttpGet("{operationId}")]
+        public async Task<ActionResult<RegisterDocumentResponse>> GetStatus(string operationId,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(operationId))
+            {
+                return BadRequest("operationId is required.");
+            }
+
+            var operation = await _dbContext.RegistrationOperations
+                                    .AsNoTracking()
+                                    .SingleOrDefaultAsync(
+                                        operation =>
+                                            operation.Id == operationId,
+                                        cancellationToken);
+
+            if (operation is null)
+            {
+                return NotFound();
+            }
+
+            return Ok(new RegisterDocumentResponse(
+                OperationId: operation.Id,
+                Status: operation.Status));
         }
     }
 }

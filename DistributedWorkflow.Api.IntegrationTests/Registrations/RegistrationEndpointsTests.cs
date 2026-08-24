@@ -1,4 +1,5 @@
 ﻿using DistributedWorkflow.Api.Data;
+using DistributedWorkflow.Api.Data.Entities;
 using DistributedWorkflow.Api.IntegrationTests.Factories;
 using DistributedWorkflow.Api.IntegrationTests.Fixtures;
 using DistributedWorkflow.Api.Models;
@@ -292,6 +293,70 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
             });
 
             Assert.Single(matchingOutboxMessages);
+        }
+
+        [Fact]
+        public async Task GetStatus_WhenOperationExists_ReturnsOkWithOperationStatus()
+        {
+            // Arrange
+            using var factory = new ApiWebApplicationFactory(
+                _fixture.Container.GetConnectionString(),
+                "localhost:1,abortConnect=false");
+
+            using var client = factory.CreateClient();
+
+            var options = new DbContextOptionsBuilder<RegistrationDbContext>()
+                .UseNpgsql(_fixture.Container.GetConnectionString())
+                .Options;
+
+            await using var dbContext = new RegistrationDbContext(options);
+
+            var operationId = Guid.NewGuid();
+            var registrationOperation = new RegistrationOperation()
+            {
+                Id = operationId.ToString(),
+                IdempotencyKey = Guid.NewGuid().ToString(),
+                DocumentId = Guid.NewGuid().ToString(),
+                CreatedAt = DateTime.UtcNow,
+                Status = "Succeeded",
+                Title = "Test"
+            };
+
+            await dbContext.RegistrationOperations.AddAsync(registrationOperation, TestContext.Current.CancellationToken);
+
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            // Act
+            using var response = await client.GetAsync($"/registrations/{operationId}",
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var content = await response.Content.ReadFromJsonAsync<RegisterDocumentResponse>(
+                    cancellationToken: TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.NotNull(content);
+            Assert.Equal(operationId.ToString(), content.OperationId);
+            Assert.Equal("Succeeded", content.Status);
+        }
+
+        [Fact]
+        public async Task GetStatus_WhenOperationDoesNotExist_ReturnsNotFound()
+        {
+            // Arrange
+            using var factory = new ApiWebApplicationFactory(
+                _fixture.Container.GetConnectionString(),
+                "localhost:1,abortConnect=false");
+
+            using var client = factory.CreateClient();
+
+            // Act
+            using var response = await client.GetAsync($"/registrations/{Guid.NewGuid()}",
+                TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
     }
 }
