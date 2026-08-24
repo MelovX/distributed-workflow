@@ -1,13 +1,13 @@
 services:
     redis:
         image: redis:7
-        container_name: interview-redis
+        container_name: distributed-workflow-redis
         ports:
             - "6379:6379"
 
     rabbitmq:
         image: rabbitmq:3-management
-        container_name: interview-rabbitmq
+        container_name: distributed-workflow-rabbitmq
         ports:
             - "5673:5672"
             - "15672:15672"
@@ -20,7 +20,7 @@ services:
 
     postgres:
         image: postgres:16
-        container_name: interview-postgres
+        container_name: distributed-workflow-postgres
         ports:
             - "5433:5432"
         environment:
@@ -39,8 +39,8 @@ services:
     migrations:
         profiles:
             - apps
-        image: interview-api:local
-        container_name: interview-migrations
+        image: distributed-workflow-api:local
+        container_name: distributed-workflow-migrations
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             RunMigrations: "true"
@@ -52,7 +52,7 @@ services:
 
     prometheus:
         image: prom/prometheus
-        container_name: interview-prometheus
+        container_name: distributed-workflow-prometheus
         ports:
             - "9090:9090"
         volumes:
@@ -60,7 +60,7 @@ services:
 
     grafana:
         image: grafana/grafana
-        container_name: interview-grafana
+        container_name: distributed-workflow-grafana
         ports:
             - "3000:3000"
         environment:
@@ -69,7 +69,7 @@ services:
 
     redpanda:
         image: docker.redpanda.com/redpandadata/redpanda:latest
-        container_name: interview-redpanda
+        container_name: distributed-workflow-redpanda
         command:
             - redpanda
             - start
@@ -89,7 +89,7 @@ services:
 
     redpanda-console:
         image: docker.redpanda.com/redpandadata/console:latest
-        container_name: interview-redpanda-console
+        container_name: distributed-workflow-redpanda-console
         depends_on:
             - redpanda
         ports:
@@ -102,11 +102,11 @@ services:
     analytics:
         profiles:
             - apps
-        image: interview-analytics:local
+        image: distributed-workflow-analytics:local
         build:
             context: .
-            dockerfile: Interview.Playground.Analytics/Dockerfile
-        container_name: interview-analytics
+            dockerfile: DistributedWorkflow.Analytics/Dockerfile
+        container_name: distributed-workflow-analytics
         environment:
             DOTNET_ENVIRONMENT: Production
             Kafka__BootstrapServers: redpanda:9092
@@ -118,11 +118,11 @@ services:
     numbering-grpc:
         profiles:
             - apps
-        image: interview-numbering-grpc:local
+        image: distributed-workflow-numbering-grpc:local
         build:
             context: .
-            dockerfile: Interview.Playground.Numbering.Grpc/Dockerfile
-        container_name: interview-numbering-grpc
+            dockerfile: DistributedWorkflow.Numbering.Grpc/Dockerfile
+        container_name: distributed-workflow-numbering-grpc
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
@@ -132,11 +132,11 @@ services:
     worker:
         profiles:
             - apps
-        image: interview-worker:local
+        image: distributed-workflow-worker:local
         build:
             context: .
-            dockerfile: Interview.Playground.Worker/Dockerfile
-        container_name: interview-worker
+            dockerfile: DistributedWorkflow.Worker/Dockerfile
+        container_name: distributed-workflow-worker
         environment:
             DOTNET_ENVIRONMENT: Production
             ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
@@ -163,11 +163,11 @@ services:
     api:
         profiles:
             - apps
-        image: interview-api:local
+        image: distributed-workflow-api:local
         build:
             context: .
-            dockerfile: Interview.Playground.Api/Dockerfile
-        container_name: interview-api
+            dockerfile: DistributedWorkflow.Api/Dockerfile
+        container_name: distributed-workflow-api
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
