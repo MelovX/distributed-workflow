@@ -8,6 +8,8 @@ services:
     rabbitmq:
         image: rabbitmq:3-management
         container_name: distributed-workflow-rabbitmq
+        volumes:
+            - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
         ports:
             - "5673:5672"
             - "15672:15672"
@@ -57,6 +59,7 @@ services:
             - "9090:9090"
         volumes:
             - ./prometheus.yml:/etc/prometheus/prometheus.yml
+            - prometheus-data:/prometheus
 
     grafana:
         image: grafana/grafana
@@ -66,6 +69,11 @@ services:
         environment:
             GF_SECURITY_ADMIN_USER: admin
             GF_SECURITY_ADMIN_PASSWORD: admin
+        volumes:
+            - grafana-data:/var/lib/grafana
+            - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+            - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+            - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
     redpanda:
         image: docker.redpanda.com/redpandadata/redpanda:latest
@@ -146,6 +154,7 @@ services:
             Kafka__BootstrapServers: redpanda:9092
             Kafka__TopicName: document-registered
             NumberingGrpc__Address: http://numbering-grpc:8080
+            ASPNETCORE_URLS: http://+:8080
         depends_on:
             postgres:
                 condition: service_started
@@ -176,7 +185,7 @@ services:
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
-            Outbox__DispatcherCount: 4
+            Outbox__DispatcherCount: 16
         ports:
             - "5268:8080"
         healthcheck:
@@ -199,3 +208,5 @@ services:
 volumes:
     postgres-data:
     redpanda-data:
+    prometheus-data:
+    grafana-data:

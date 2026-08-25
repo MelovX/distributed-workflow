@@ -11,6 +11,8 @@ using RabbitMQ.Client.Events;
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client.Exceptions;
+using System.Diagnostics;
+using DistributedWorkflow.Worker.Metrics;
 
 namespace DistributedWorkflow.Worker;
 
@@ -19,7 +21,7 @@ public sealed class Worker : BackgroundService
     private const string _exchangeName = "registration.commands";
     private const string _queueName = "registration.register";
     private const string _routingKey = "registration.register";
-    private const ushort ConsumerConcurrency = 4;
+    private const ushort ConsumerConcurrency = 8;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly KafkaDocumentEventPublisher _kafkaPublisher;
@@ -95,6 +97,8 @@ public sealed class Worker : BackgroundService
 
         consumer.ReceivedAsync += async (_, eventArgs) =>
         {
+            var startedAt = Stopwatch.GetTimestamp();
+
             try
             {
                 var json = Encoding.UTF8.GetString(eventArgs.Body.ToArray());
@@ -103,7 +107,7 @@ public sealed class Worker : BackgroundService
 
                 if (command is null)
                 {
-                    Console.WriteLine("Invalid register document command.");
+                    _logger.LogWarning("Invalid register document command.");
 
                     await RejectAsync(
                         eventArgs.DeliveryTag,
@@ -120,7 +124,9 @@ public sealed class Worker : BackgroundService
 
                 if (operation is null)
                 {
-                    Console.WriteLine($"Operation not found. OperationId={command.OperationId}");
+                    _logger.LogWarning(
+                        "Operation not found. OperationId={OperationId}",
+                        command.OperationId);
 
                     await RejectAsync(
                         eventArgs.DeliveryTag,
@@ -131,7 +137,9 @@ public sealed class Worker : BackgroundService
 
                 if (operation.Status == "Succeeded")
                 {
-                    Console.WriteLine($"Operation already succeeded. OperationId={command.OperationId}");
+                    _logger.LogDebug(
+                        "Operation already succeeded. OperationId={OperationId}",
+                        command.OperationId);
 
                     await AcknowledgeAsync(
                         eventArgs.DeliveryTag,
@@ -143,8 +151,10 @@ public sealed class Worker : BackgroundService
                 operation.Status = "InProgress";
                 await dbContext.SaveChangesAsync(stoppingToken);
 
-                Console.WriteLine(
-                    $"Registration started. OperationId={command.OperationId}, DocumentId={command.DocumentId}, Title={command.Title}");
+                _logger.LogDebug(
+                    "Registration started. OperationId={OperationId}, DocumentId={DocumentId}",
+                    command.OperationId,
+                    command.DocumentId);
 
                 var reserveNumberResponse = await _numberingClient.ReserveNumberAsync(
                     new ReserveNumberRequest
@@ -155,8 +165,10 @@ public sealed class Worker : BackgroundService
                     deadline: DateTime.UtcNow.AddSeconds(3),
                     cancellationToken: stoppingToken);
 
-                Console.WriteLine(
-                    $"Number reserved via gRPC. Number={reserveNumberResponse.Number}, Status={reserveNumberResponse.Status}");
+                _logger.LogDebug(
+                    "Number reserved via gRPC. OperationId={OperationId}, Status={Status}",
+                    command.OperationId,
+                    reserveNumberResponse.Status);
 
                 operation.Status = "Succeeded";
                 await dbContext.SaveChangesAsync(stoppingToken);
@@ -172,23 +184,34 @@ public sealed class Worker : BackgroundService
                     },
                     stoppingToken);
 
-                Console.WriteLine(
-                    $"DocumentRegisteredEvent published. OperationId={command.OperationId}");
+                _logger.LogDebug(
+                    "DocumentRegisteredEvent published. OperationId={OperationId}",
+                    command.OperationId);
 
                 await AcknowledgeAsync(
                     eventArgs.DeliveryTag,
                     stoppingToken);
 
-                Console.WriteLine(
-                    $"Registration completed. OperationId={command.OperationId}");
+                WorkerMetrics.RegistrationsCompleted.Add(1);
+
+                _logger.LogDebug(
+                    "Registration completed. OperationId={OperationId}",
+                    command.OperationId);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Registration failed: {ex.Message}");
+                _logger.LogError(ex, "Registration failed: DeliveryTag={DeliveryTag}", eventArgs.DeliveryTag);
 
                 await RejectAsync(
                     eventArgs.DeliveryTag,
                     CancellationToken.None);
+            }
+            finally
+            {
+                var elapsed = Stopwatch.GetElapsedTime(startedAt);
+
+                WorkerMetrics.RegistrationProcessingDuration.Record(
+                    elapsed.TotalSeconds);
             }
         };
 
@@ -198,7 +221,7 @@ public sealed class Worker : BackgroundService
             consumer: consumer,
             cancellationToken: stoppingToken);
 
-        Console.WriteLine("Registration worker started.");
+        _logger.LogInformation("Registration worker started.");
 
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }

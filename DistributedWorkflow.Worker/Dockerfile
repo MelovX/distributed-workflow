@@ -12,8 +12,10 @@ RUN dotnet publish "DistributedWorkflow.Worker.csproj" \
     --no-restore \
     /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/runtime:9.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 WORKDIR /app
+
+EXPOSE 8080
 
 COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "DistributedWorkflow.Worker.dll"]
