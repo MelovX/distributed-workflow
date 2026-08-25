@@ -76,8 +76,24 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<IConnectionMultiplexer>(
     _ => ConnectionMultiplexer.Connect(redisConnectionString));
-builder.Services.AddSingleton<RabbitMqRegistrationPublisher>();
-builder.Services.AddHostedService<OutboxDispatcher>();
+builder.Services.AddTransient<RabbitMqRegistrationPublisher>();
+
+var outboxDispatcherCount = builder.Configuration.GetValue(
+    "Outbox:DispatcherCount",
+    1);
+
+if (outboxDispatcherCount < 1)
+{
+    throw new InvalidOperationException(
+        "Outbox:DispatcherCount must be greater than zero.");
+}
+
+for (var index = 0; index < outboxDispatcherCount; index++)
+{
+    builder.Services.AddSingleton<IHostedService>(serviceProvider =>
+        ActivatorUtilities.CreateInstance<OutboxDispatcher>(serviceProvider));
+}
+
 builder.Services.AddDbContext<RegistrationDbContext>(options =>
 {
     options.UseNpgsql(registrationDbConnectionString);

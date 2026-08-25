@@ -44,7 +44,7 @@ services:
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             RunMigrations: "true"
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
         depends_on:
             postgres:
                 condition: service_healthy
@@ -136,10 +136,9 @@ services:
         build:
             context: .
             dockerfile: DistributedWorkflow.Worker/Dockerfile
-        container_name: distributed-workflow-worker
         environment:
             DOTNET_ENVIRONMENT: Production
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             RabbitMq__HostName: rabbitmq
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
@@ -171,12 +170,13 @@ services:
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=40;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             ConnectionStrings__Redis: redis:6379
             RabbitMq__HostName: rabbitmq
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
+            Outbox__DispatcherCount: 4
         ports:
             - "5268:8080"
         healthcheck:

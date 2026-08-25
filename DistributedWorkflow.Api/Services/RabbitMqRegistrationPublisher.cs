@@ -15,9 +15,10 @@ namespace DistributedWorkflow.Api.Services
         private const string RoutingKey = "registration.register";
 
         private readonly ConnectionFactory _factory;
-        private readonly SemaphoreSlim _connectionLock = new(1, 1);
+        private readonly SemaphoreSlim _publishLock = new(1, 1);
 
         private IConnection? _connection;
+        private IChannel? _channel;
 
         public RabbitMqRegistrationPublisher(IOptions<RabbitMqOptions> options)
         {
@@ -28,63 +29,100 @@ namespace DistributedWorkflow.Api.Services
                 HostName = rabbitMq.HostName,
                 Port = rabbitMq.Port,
                 UserName = rabbitMq.UserName,
-                Password = rabbitMq.Password
+                Password = rabbitMq.Password,
+                AutomaticRecoveryEnabled = true,
+                TopologyRecoveryEnabled = true,
+                NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+                ClientProvidedName = "distributed-workflow-outbox-publisher"
             };
         }
 
         public async Task PublishRawAsync(string messageId, string payload,
             CancellationToken cancellationToken = default)
         {
-            var connection = await GetConnectionAsync(cancellationToken);
-
-            await using var channel = await connection.CreateChannelAsync(
-                cancellationToken: cancellationToken);
-
-            await DeclareTopologyAsync(channel, cancellationToken);
-
-            var body = Encoding.UTF8.GetBytes(payload);
-
-            var properties = new BasicProperties
-            {
-                Persistent = true,
-                MessageId = messageId,
-                ContentType = "application/json",
-                Type = nameof(RegisterDocumentCommand),
-                Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
-            };
-
-            await channel.BasicPublishAsync(
-                exchange: ExchangeName,
-                routingKey: RoutingKey,
-                mandatory: true,
-                basicProperties: properties,
-                body: body,
-                cancellationToken: cancellationToken);
-        }
-
-        private async Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken)
-        {
-            if (_connection is { IsOpen: true })
-            {
-                return _connection;
-            }
-
-            await _connectionLock.WaitAsync(cancellationToken);
+            await _publishLock.WaitAsync(cancellationToken);
 
             try
             {
-                if (_connection is { IsOpen: true })
+                var channel = await GetChannelAsync(cancellationToken);
+                var body = Encoding.UTF8.GetBytes(payload);
+
+                var properties = new BasicProperties
                 {
-                    return _connection;
-                }
+                    Persistent = true,
+                    MessageId = messageId,
+                    ContentType = "application/json",
+                    Type = nameof(RegisterDocumentCommand),
+                    Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+                };
 
-                _connection = await _factory.CreateConnectionAsync(cancellationToken);
-
-                return _connection;
+                await channel.BasicPublishAsync(
+                    exchange: ExchangeName,
+                    routingKey: RoutingKey,
+                    mandatory: true,
+                    basicProperties: properties,
+                    body: body,
+                    cancellationToken: cancellationToken);
+            }
+            catch
+            {
+                await ResetChannelAsync();
+                throw;
             }
             finally
             {
-                _connectionLock.Release();
+                _publishLock.Release();
+            }
+        }
+
+        private async Task<IChannel> GetChannelAsync(CancellationToken cancellationToken)
+        {
+            if (_channel is { IsOpen: true })
+            {
+                return _channel;
+            }
+
+            await ResetChannelAsync();
+
+            if (_connection is not { IsOpen: true })
+            {
+                if (_connection is not null)
+                {
+                    await _connection.DisposeAsync();
+                }
+
+                _connection = await _factory.CreateConnectionAsync(cancellationToken);
+            }
+
+            _channel = await _connection.CreateChannelAsync(
+                new CreateChannelOptions(
+                    publisherConfirmationsEnabled: true,
+                    publisherConfirmationTrackingEnabled: true),
+                cancellationToken);
+
+            await DeclareTopologyAsync(_channel, cancellationToken);
+
+            return _channel;
+        }
+
+        private async Task ResetChannelAsync()
+        {
+            if (_channel is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await _channel.DisposeAsync();
+            }
+            catch
+            {
+                // The channel is already unusable. The next publish creates a new one.
+            }
+            finally
+            {
+                _channel = null;
             }
         }
 
@@ -115,12 +153,23 @@ namespace DistributedWorkflow.Api.Services
 
         public async ValueTask DisposeAsync()
         {
-            if (_connection is not null)
-            {
-                await _connection.DisposeAsync();
-            }
+            await _publishLock.WaitAsync();
 
-            _connectionLock.Dispose();
+            try
+            {
+                await ResetChannelAsync();
+
+                if (_connection is not null)
+                {
+                    await _connection.DisposeAsync();
+                    _connection = null;
+                }
+            }
+            finally
+            {
+                _publishLock.Release();
+                _publishLock.Dispose();
+            }
         }
     }
 }
