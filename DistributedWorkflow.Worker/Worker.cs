@@ -19,6 +19,7 @@ public sealed class Worker : BackgroundService
     private const string _exchangeName = "registration.commands";
     private const string _queueName = "registration.register";
     private const string _routingKey = "registration.register";
+    private const ushort ConsumerConcurrency = 4;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly KafkaDocumentEventPublisher _kafkaPublisher;
@@ -27,6 +28,7 @@ public sealed class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
 
     private static readonly TimeSpan RabbitMqRetryDelay = TimeSpan.FromSeconds(5);
+    private readonly SemaphoreSlim _acknowledgementLock = new(1, 1);
 
     private IConnection? _connection;
     private IChannel? _channel;
@@ -56,7 +58,8 @@ public sealed class Worker : BackgroundService
             AutomaticRecoveryEnabled = true,
             TopologyRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
-            ClientProvidedName = "distributed-workflow-registration-worker"
+            ClientProvidedName = "distributed-workflow-registration-worker",
+            ConsumerDispatchConcurrency = ConsumerConcurrency
         };
 
         _connection = await ConnectWithRetryAsync(factory, stoppingToken);
@@ -84,7 +87,7 @@ public sealed class Worker : BackgroundService
 
         await _channel.BasicQosAsync(
             prefetchSize: 0,
-            prefetchCount: 1,
+            prefetchCount: ConsumerConcurrency,
             global: false,
             cancellationToken: stoppingToken);
 
@@ -102,10 +105,9 @@ public sealed class Worker : BackgroundService
                 {
                     Console.WriteLine("Invalid register document command.");
 
-                    await _channel.BasicRejectAsync(
-                        deliveryTag: eventArgs.DeliveryTag,
-                        requeue: false,
-                        cancellationToken: stoppingToken);
+                    await RejectAsync(
+                        eventArgs.DeliveryTag,
+                        stoppingToken);
 
                     return;
                 }
@@ -120,10 +122,9 @@ public sealed class Worker : BackgroundService
                 {
                     Console.WriteLine($"Operation not found. OperationId={command.OperationId}");
 
-                    await _channel.BasicRejectAsync(
-                        deliveryTag: eventArgs.DeliveryTag,
-                        requeue: false,
-                        cancellationToken: stoppingToken);
+                    await RejectAsync(
+                        eventArgs.DeliveryTag,
+                        stoppingToken);
 
                     return;
                 }
@@ -132,10 +133,9 @@ public sealed class Worker : BackgroundService
                 {
                     Console.WriteLine($"Operation already succeeded. OperationId={command.OperationId}");
 
-                    await _channel.BasicAckAsync(
-                        deliveryTag: eventArgs.DeliveryTag,
-                        multiple: false,
-                        cancellationToken: stoppingToken);
+                    await AcknowledgeAsync(
+                        eventArgs.DeliveryTag,
+                        stoppingToken);
 
                     return;
                 }
@@ -175,10 +175,9 @@ public sealed class Worker : BackgroundService
                 Console.WriteLine(
                     $"DocumentRegisteredEvent published. OperationId={command.OperationId}");
 
-                await _channel.BasicAckAsync(
-                    deliveryTag: eventArgs.DeliveryTag,
-                    multiple: false,
-                    cancellationToken: stoppingToken);
+                await AcknowledgeAsync(
+                    eventArgs.DeliveryTag,
+                    stoppingToken);
 
                 Console.WriteLine(
                     $"Registration completed. OperationId={command.OperationId}");
@@ -187,10 +186,9 @@ public sealed class Worker : BackgroundService
             {
                 Console.WriteLine($"Registration failed: {ex.Message}");
 
-                await _channel.BasicRejectAsync(
-                    deliveryTag: eventArgs.DeliveryTag,
-                    requeue: false,
-                    cancellationToken: CancellationToken.None);
+                await RejectAsync(
+                    eventArgs.DeliveryTag,
+                    CancellationToken.None);
             }
         };
 
@@ -203,6 +201,44 @@ public sealed class Worker : BackgroundService
         Console.WriteLine("Registration worker started.");
 
         await Task.Delay(Timeout.Infinite, stoppingToken);
+    }
+
+    private async Task AcknowledgeAsync(
+        ulong deliveryTag,
+        CancellationToken cancellationToken)
+    {
+        await _acknowledgementLock.WaitAsync(cancellationToken);
+
+        try
+        {
+            await _channel!.BasicAckAsync(
+                deliveryTag: deliveryTag,
+                multiple: false,
+                cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            _acknowledgementLock.Release();
+        }
+    }
+
+    private async Task RejectAsync(
+        ulong deliveryTag,
+        CancellationToken cancellationToken)
+    {
+        await _acknowledgementLock.WaitAsync(cancellationToken);
+
+        try
+        {
+            await _channel!.BasicRejectAsync(
+                deliveryTag: deliveryTag,
+                requeue: false,
+                cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            _acknowledgementLock.Release();
+        }
     }
 
     private async Task<IConnection> ConnectWithRetryAsync(

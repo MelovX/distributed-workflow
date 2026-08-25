@@ -6,6 +6,8 @@ namespace DistributedWorkflow.Api.Services
 {
     public class OutboxDispatcher : BackgroundService
     {
+        private const int BatchSize = 100;
+
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly RabbitMqRegistrationPublisher _publisher;
         private readonly ILogger<OutboxDispatcher> _logger;
@@ -24,24 +26,31 @@ namespace DistributedWorkflow.Api.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("Outbox dispatcher started.");
+            _logger.LogInformation(
+                "Outbox dispatcher {DispatcherId} started.",
+                _dispatcherId);
 
             while (!stoppingToken.IsCancellationRequested)
             {
+                var processedCount = 0;
+
                 try
                 {
-                    await DispatchBatchAsync(stoppingToken);
+                    processedCount = await DispatchBatchAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Outbox dispatcher iteration failed.");
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                if (processedCount == 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                }
             }
         }
 
-        private async Task DispatchBatchAsync(CancellationToken cancellationToken)
+        private async Task<int> DispatchBatchAsync(CancellationToken cancellationToken)
         {
             using var scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<RegistrationDbContext>();
@@ -50,41 +59,35 @@ namespace DistributedWorkflow.Api.Services
             var lockUntil = now.AddSeconds(20);
             var lockOwner = $"{_dispatcherId}-{Guid.NewGuid():N}";
 
-            var candidateIds = await dbContext.OutboxMessages
-                .Where(x =>
-                    x.PublishedAt == null &&
-                    (x.LockedUntil == null || x.LockedUntil < now))
-                .OrderBy(x => x.CreatedAt)
-                .Take(10)
-                .Select(x => x.Id)
-                .ToListAsync(cancellationToken);
-
-            if (candidateIds.Count == 0)
-            {
-                return;
-            }
-
-            await dbContext.OutboxMessages
-                .Where(x =>
-                    candidateIds.Contains(x.Id) &&
-                    x.PublishedAt == null &&
-                    (x.LockedUntil == null || x.LockedUntil < now))
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(x => x.LockedUntil, lockUntil)
-                    .SetProperty(x => x.LockedBy, lockOwner),
-                    cancellationToken);
+            await using var transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
             var messages = await dbContext.OutboxMessages
-                .Where(x =>
-                    x.PublishedAt == null &&
-                    x.LockedBy == lockOwner)
-                .OrderBy(x => x.CreatedAt)
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM "OutboxMessages"
+                    WHERE "PublishedAt" IS NULL
+                      AND ("LockedUntil" IS NULL OR "LockedUntil" < {now})
+                    ORDER BY "CreatedAt", "Id"
+                    LIMIT {BatchSize}
+                    FOR UPDATE SKIP LOCKED
+                    """)
                 .ToListAsync(cancellationToken);
 
             if (messages.Count == 0)
             {
-                return;
+                await transaction.CommitAsync(cancellationToken);
+                return 0;
             }
+
+            foreach (var message in messages)
+            {
+                message.LockedUntil = lockUntil;
+                message.LockedBy = lockOwner;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             foreach (var message in messages)
             {
@@ -120,6 +123,8 @@ namespace DistributedWorkflow.Api.Services
             await dbContext.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Processed {Count} outbox messages.", messages.Count);
+
+            return messages.Count;
         }
     }
 }
