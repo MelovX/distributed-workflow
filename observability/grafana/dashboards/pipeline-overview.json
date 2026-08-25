@@ -742,7 +742,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (job) (rate(dotnet_process_cpu_time_seconds_total{job=~\"distributed-workflow-api|distributed-workflow-worker\"}[$__rate_interval]))",
+          "expr": "sum by (job) (rate(dotnet_process_cpu_time_seconds_total{job=~\"distributed-workflow-api|distributed-workflow-worker|distributed-workflow-outbox-publisher\"}[$__rate_interval]))",
           "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"
@@ -799,7 +799,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "dotnet_process_memory_working_set_bytes{job=~\"distributed-workflow-api|distributed-workflow-worker\"}",
+          "expr": "dotnet_process_memory_working_set_bytes{job=~\"distributed-workflow-api|distributed-workflow-worker|distributed-workflow-outbox-publisher\"}",
           "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"

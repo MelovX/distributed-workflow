@@ -36,11 +36,6 @@ namespace DistributedWorkflow.Api.IntegrationTests.Factories
                 "ConnectionStrings:Redis",
                 _redisConnectionString);
 
-            builder.UseSetting("RabbitMq:HostName", "localhost");
-            builder.UseSetting("RabbitMq:Port", "1");
-            builder.UseSetting("RabbitMq:UserName", "test");
-            builder.UseSetting("RabbitMq:Password", "test");
-
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IHostedService>();

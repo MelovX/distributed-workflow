@@ -2,5 +2,6 @@
 **/bin/
 **/obj/
 *.log
+*.user
 *.testingPlatformFirstTimeUseSentinel
 reports/

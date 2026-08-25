@@ -21,6 +21,17 @@ scrape_configs:
         port: 8080
         refresh_interval: 5s
 
+  - job_name: distributed-workflow-outbox-publisher
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names:
+          - outbox-publisher
+        type: A
+        port: 8080
+        refresh_interval: 5s
+
   - job_name: distributed-workflow-rabbitmq
     metric_name_validation_scheme: legacy
     metric_name_escaping_scheme: underscores

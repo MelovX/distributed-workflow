@@ -181,11 +181,6 @@ services:
             ASPNETCORE_URLS: http://+:8080
             ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=40;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             ConnectionStrings__Redis: redis:6379
-            RabbitMq__HostName: rabbitmq
-            RabbitMq__Port: 5672
-            RabbitMq__UserName: guest
-            RabbitMq__Password: guest
-            Outbox__DispatcherCount: 16
         ports:
             - "5268:8080"
         healthcheck:
@@ -201,6 +196,35 @@ services:
                 condition: service_completed_successfully
             redis:
                 condition: service_started
+        restart: on-failure
+
+    outbox-publisher:
+        profiles:
+            - apps
+        image: distributed-workflow-outbox-publisher:local
+        build:
+            context: .
+            dockerfile: DistributedWorkflow.OutboxPublisher/Dockerfile
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__OutboxDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            RabbitMq__HostName: rabbitmq
+            RabbitMq__Port: 5672
+            RabbitMq__UserName: guest
+            RabbitMq__Password: guest
+            Outbox__DispatcherCount: 16
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 15s
+        depends_on:
+            postgres:
+                condition: service_healthy
+            migrations:
+                condition: service_completed_successfully
             rabbitmq:
                 condition: service_healthy
         restart: on-failure
