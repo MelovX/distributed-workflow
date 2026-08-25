@@ -4,8 +4,11 @@ using DistributedWorkflow.Worker.Configuration;
 using DistributedWorkflow.Worker.Data;
 using DistributedWorkflow.Worker.Services;
 using Microsoft.EntityFrameworkCore;
+using DistributedWorkflow.Worker.Metrics;
+using Microsoft.AspNetCore.Builder;
+using OpenTelemetry.Metrics;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
 
 var registrationDbConnectionString =
     builder.Configuration.GetConnectionString("RegistrationDb")
@@ -25,6 +28,36 @@ if (!Uri.TryCreate(
     throw new InvalidOperationException(
         "NumberingGrpc:Address must be a valid absolute URI.");
 }
+
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddMeter(WorkerMetrics.MeterName)
+            .AddView(
+                WorkerMetrics.RegistrationProcessingDurationName,
+                new ExplicitBucketHistogramConfiguration
+                {
+                    Boundaries =
+                    [
+                        0.001,
+                        0.002,
+                        0.005,
+                        0.010,
+                        0.025,
+                        0.050,
+                        0.100,
+                        0.250,
+                        0.500,
+                        1.000,
+                        2.500,
+                        5.000
+                    ]
+                })
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
 
 builder.Services
     .AddOptions<RabbitMqOptions>()
@@ -68,5 +101,8 @@ builder.Services.AddGrpcClient<NumberingService.NumberingServiceClient>(
         options.Address = numberingGrpcAddress;
     });
 
-var host = builder.Build();
-host.Run();
+var app = builder.Build();
+
+app.UseOpenTelemetryPrometheusScrapingEndpoint();
+
+app.Run();
