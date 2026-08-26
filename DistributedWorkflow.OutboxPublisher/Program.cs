@@ -19,7 +19,7 @@ builder.Services.AddOpenTelemetry()
             .AddAspNetCoreInstrumentation()
             .AddRuntimeInstrumentation()
             .AddView(
-                "outbox.publish.duration",
+                "outbox.publish.batch.duration",
                 new ExplicitBucketHistogramConfiguration
                 {
                     Boundaries =
@@ -36,6 +36,21 @@ builder.Services.AddOpenTelemetry()
                         1.000,
                         2.500,
                         5.000
+                    ]
+                })
+            .AddView(
+                "outbox.publish.batch.size",
+                new ExplicitBucketHistogramConfiguration
+                {
+                    Boundaries =
+                    [
+                        1,
+                        10,
+                        25,
+                        50,
+                        75,
+                        100,
+                        128
                     ]
                 })
             .AddView(
@@ -97,6 +112,7 @@ if (dispatcherCount < 1)
         "Outbox:DispatcherCount must be greater than zero.");
 }
 
+builder.Services.AddSingleton<RabbitMqConnectionProvider>();
 builder.Services.AddTransient<RabbitMqOutboxPublisher>();
 
 for (var index = 0; index < dispatcherCount; index++)

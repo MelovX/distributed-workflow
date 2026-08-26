@@ -23,6 +23,18 @@ services:
     postgres:
         image: postgres:16
         container_name: distributed-workflow-postgres
+        command:
+            - postgres
+            - -c
+            - shared_buffers=1GB
+            - -c
+            - max_wal_size=8GB
+            - -c
+            - checkpoint_timeout=15min
+            - -c
+            - checkpoint_completion_target=0.9
+            - -c
+            - wal_buffers=16MB
         ports:
             - "5433:5432"
         environment:
@@ -150,6 +162,7 @@ services:
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
+            RabbitMq__ConsumerConcurrency: 24
             Kafka__BootstrapServers: redpanda:9092
             Kafka__TopicName: document-registered
             NumberingGrpc__Address: http://numbering-grpc:8080
@@ -228,7 +241,7 @@ services:
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
-            Outbox__DispatcherCount: 16
+            Outbox__DispatcherCount: 8
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
             interval: 10s

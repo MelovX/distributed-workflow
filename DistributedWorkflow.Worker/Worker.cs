@@ -19,8 +19,6 @@ public sealed class Worker : BackgroundService
     private const string _exchangeName = "registration.commands";
     private const string _queueName = "registration.register";
     private const string _routingKey = "registration.register";
-    private const ushort ConsumerConcurrency = 8;
-
     private readonly KafkaDocumentEventPublisher _kafkaPublisher;
     private readonly NumberingService.NumberingServiceClient _numberingClient;
     private readonly RabbitMqOptions _rabbitMqOptions;
@@ -56,7 +54,7 @@ public sealed class Worker : BackgroundService
             TopologyRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             ClientProvidedName = "distributed-workflow-registration-worker",
-            ConsumerDispatchConcurrency = ConsumerConcurrency
+            ConsumerDispatchConcurrency = _rabbitMqOptions.ConsumerConcurrency
         };
 
         _connection = await ConnectWithRetryAsync(factory, stoppingToken);
@@ -84,7 +82,7 @@ public sealed class Worker : BackgroundService
 
         await _channel.BasicQosAsync(
             prefetchSize: 0,
-            prefetchCount: ConsumerConcurrency,
+            prefetchCount: _rabbitMqOptions.ConsumerConcurrency,
             global: false,
             cancellationToken: stoppingToken);
 
@@ -116,38 +114,69 @@ public sealed class Worker : BackgroundService
                     command.OperationId,
                     command.DocumentId);
 
-                var reserveNumberResponse = await _numberingClient.ReserveNumberAsync(
-                    new ReserveNumberRequest
-                    {
-                        DocumentId = command.DocumentId,
-                        OperationId = command.OperationId
-                    },
-                    deadline: DateTime.UtcNow.AddSeconds(3),
-                    cancellationToken: stoppingToken);
+                var numberingStartedAt = Stopwatch.GetTimestamp();
+                ReserveNumberResponse reserveNumberResponse;
+
+                try
+                {
+                    reserveNumberResponse = await _numberingClient.ReserveNumberAsync(
+                        new ReserveNumberRequest
+                        {
+                            DocumentId = command.DocumentId,
+                            OperationId = command.OperationId
+                        },
+                        deadline: DateTime.UtcNow.AddSeconds(3),
+                        cancellationToken: stoppingToken);
+                }
+                finally
+                {
+                    WorkerMetrics.NumberingRequestDuration.Record(
+                        Stopwatch.GetElapsedTime(numberingStartedAt).TotalSeconds);
+                }
 
                 _logger.LogDebug(
                     "Number reserved via gRPC. OperationId={OperationId}, Status={Status}",
                     command.OperationId,
                     reserveNumberResponse.Status);
 
-                await _kafkaPublisher.PublishAsync(
-                    new DocumentRegisteredEvent
-                    {
-                        EventId = Guid.NewGuid().ToString("N"),
-                        OperationId = command.OperationId,
-                        DocumentId = command.DocumentId,
-                        Title = command.Title,
-                        RegisteredAt = DateTimeOffset.UtcNow
-                    },
-                    stoppingToken);
+                var kafkaStartedAt = Stopwatch.GetTimestamp();
+
+                try
+                {
+                    await _kafkaPublisher.PublishAsync(
+                        new DocumentRegisteredEvent
+                        {
+                            EventId = Guid.NewGuid().ToString("N"),
+                            OperationId = command.OperationId,
+                            DocumentId = command.DocumentId,
+                            Title = command.Title,
+                            RegisteredAt = DateTimeOffset.UtcNow
+                        },
+                        stoppingToken);
+                }
+                finally
+                {
+                    WorkerMetrics.KafkaPublishDuration.Record(
+                        Stopwatch.GetElapsedTime(kafkaStartedAt).TotalSeconds);
+                }
 
                 _logger.LogDebug(
                     "DocumentRegisteredEvent published. OperationId={OperationId}",
                     command.OperationId);
 
-                await AcknowledgeAsync(
-                    eventArgs.DeliveryTag,
-                    stoppingToken);
+                var acknowledgementStartedAt = Stopwatch.GetTimestamp();
+
+                try
+                {
+                    await AcknowledgeAsync(
+                        eventArgs.DeliveryTag,
+                        stoppingToken);
+                }
+                finally
+                {
+                    WorkerMetrics.RabbitMqAcknowledgementDuration.Record(
+                        Stopwatch.GetElapsedTime(acknowledgementStartedAt).TotalSeconds);
+                }
 
                 WorkerMetrics.RegistrationsCompleted.Add(1);
 

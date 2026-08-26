@@ -47,6 +47,15 @@ builder.Services.AddOpenTelemetry()
                         5.000
                     ]
                 })
+            .AddView(
+                WorkerMetrics.NumberingRequestDurationName,
+                CreateLatencyHistogramConfiguration())
+            .AddView(
+                WorkerMetrics.KafkaPublishDurationName,
+                CreateLatencyHistogramConfiguration())
+            .AddView(
+                WorkerMetrics.RabbitMqAcknowledgementDurationName,
+                CreateLatencyHistogramConfiguration())
             .AddHttpClientInstrumentation()
             .AddRuntimeInstrumentation()
             .AddPrometheusExporter();
@@ -67,6 +76,9 @@ builder.Services
     .Validate(
         options => !string.IsNullOrWhiteSpace(options.Password),
         "RabbitMq:Password is required.")
+    .Validate(
+        options => options.ConsumerConcurrency > 0,
+        "RabbitMq:ConsumerConcurrency must be greater than zero.")
     .ValidateOnStart();
 
 builder.Services
@@ -94,3 +106,26 @@ var app = builder.Build();
 app.UseOpenTelemetryPrometheusScrapingEndpoint();
 
 app.Run();
+
+static ExplicitBucketHistogramConfiguration CreateLatencyHistogramConfiguration()
+{
+    return new ExplicitBucketHistogramConfiguration
+    {
+        Boundaries =
+        [
+            0.0001,
+            0.00025,
+            0.0005,
+            0.001,
+            0.002,
+            0.005,
+            0.010,
+            0.025,
+            0.050,
+            0.100,
+            0.250,
+            0.500,
+            1.000
+        ]
+    };
+}

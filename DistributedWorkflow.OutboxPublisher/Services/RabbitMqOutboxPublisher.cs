@@ -1,72 +1,103 @@
 using System.Diagnostics;
 using System.Text;
-using DistributedWorkflow.OutboxPublisher.Configuration;
+using DistributedWorkflow.OutboxPublisher.Entities;
 using DistributedWorkflow.OutboxPublisher.Metrics;
-using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
 namespace DistributedWorkflow.OutboxPublisher.Services;
 
-public sealed class RabbitMqOutboxPublisher : IAsyncDisposable
+public sealed class RabbitMqOutboxPublisher(
+    RabbitMqConnectionProvider connectionProvider) : IAsyncDisposable
 {
     private const string ExchangeName = "registration.commands";
     private const string QueueName = "registration.register";
     private const string RoutingKey = "registration.register";
 
-    private readonly ConnectionFactory _factory;
     private readonly SemaphoreSlim _publishLock = new(1, 1);
 
-    private IConnection? _connection;
     private IChannel? _channel;
 
-    public RabbitMqOutboxPublisher(IOptions<RabbitMqOptions> options)
-    {
-        var rabbitMq = options.Value;
-
-        _factory = new ConnectionFactory
-        {
-            HostName = rabbitMq.HostName,
-            Port = rabbitMq.Port,
-            UserName = rabbitMq.UserName,
-            Password = rabbitMq.Password,
-            AutomaticRecoveryEnabled = true,
-            TopologyRecoveryEnabled = true,
-            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
-            ClientProvidedName = "distributed-workflow-outbox-publisher"
-        };
-    }
-
-    public async Task PublishRawAsync(
-        string messageId,
-        string messageType,
-        string payload,
+    public async Task<IReadOnlyList<OutboxPublishResult>> PublishBatchAsync(
+        IReadOnlyList<OutboxPublishRequest> messages,
         CancellationToken cancellationToken = default)
     {
+        if (messages.Count == 0)
+        {
+            return Array.Empty<OutboxPublishResult>();
+        }
+
         await _publishLock.WaitAsync(cancellationToken);
         var startedAt = Stopwatch.GetTimestamp();
+
+        OutboxMetrics.PublishBatchSize.Record(messages.Count);
 
         try
         {
             var channel = await GetChannelAsync(cancellationToken);
-            var body = Encoding.UTF8.GetBytes(payload);
+            var publishOperations =
+                new List<(Guid MessageId, ValueTask PublishTask)>(
+                    messages.Count);
 
-            var properties = new BasicProperties
+            foreach (var message in messages)
             {
-                Persistent = true,
-                MessageId = messageId,
-                ContentType = "application/json",
-                Type = messageType,
-                Timestamp = new AmqpTimestamp(
-                    DateTimeOffset.UtcNow.ToUnixTimeSeconds())
-            };
+                var body = Encoding.UTF8.GetBytes(message.Payload);
 
-            await channel.BasicPublishAsync(
-                exchange: ExchangeName,
-                routingKey: RoutingKey,
-                mandatory: true,
-                basicProperties: properties,
-                body: body,
-                cancellationToken: cancellationToken);
+                var properties = new BasicProperties
+                {
+                    Persistent = true,
+                    MessageId = message.MessageId.ToString(),
+                    ContentType = "application/json",
+                    Type = message.MessageType,
+                    Timestamp = new AmqpTimestamp(
+                        DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+                };
+
+                var publishTask = channel.BasicPublishAsync(
+                    exchange: ExchangeName,
+                    routingKey: RoutingKey,
+                    mandatory: true,
+                    basicProperties: properties,
+                    body: body,
+                    cancellationToken: cancellationToken);
+                publishOperations.Add((message.MessageId, publishTask));
+            }
+
+            var results = new List<OutboxPublishResult>(
+                publishOperations.Count);
+
+            foreach (var publishOperation in publishOperations)
+            {
+                try
+                {
+                    await publishOperation.PublishTask;
+
+                    results.Add(
+                        new OutboxPublishResult(
+                            publishOperation.MessageId,
+                            true,
+                            null));
+                }
+                catch (OperationCanceledException)
+                    when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    results.Add(
+                        new OutboxPublishResult(
+                            publishOperation.MessageId,
+                            false,
+                            exception));
+                }
+            }
+
+            if (!channel.IsOpen)
+            {
+                await ResetChannelAsync();
+            }
+
+            return results;
         }
         catch
         {
@@ -75,7 +106,7 @@ public sealed class RabbitMqOutboxPublisher : IAsyncDisposable
         }
         finally
         {
-            OutboxMetrics.PublishDuration.Record(
+            OutboxMetrics.PublishBatchDuration.Record(
                 Stopwatch.GetElapsedTime(startedAt).TotalSeconds);
             _publishLock.Release();
         }
@@ -91,17 +122,10 @@ public sealed class RabbitMqOutboxPublisher : IAsyncDisposable
 
         await ResetChannelAsync();
 
-        if (_connection is not { IsOpen: true })
-        {
-            if (_connection is not null)
-            {
-                await _connection.DisposeAsync();
-            }
+        var connection = await connectionProvider.GetConnectionAsync(
+            cancellationToken);
 
-            _connection = await _factory.CreateConnectionAsync(cancellationToken);
-        }
-
-        _channel = await _connection.CreateChannelAsync(
+        _channel = await connection.CreateChannelAsync(
             new CreateChannelOptions(
                 publisherConfirmationsEnabled: true,
                 publisherConfirmationTrackingEnabled: true),
@@ -165,12 +189,6 @@ public sealed class RabbitMqOutboxPublisher : IAsyncDisposable
         try
         {
             await ResetChannelAsync();
-
-            if (_connection is not null)
-            {
-                await _connection.DisposeAsync();
-                _connection = null;
-            }
         }
         finally
         {

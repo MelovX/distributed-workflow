@@ -14,8 +14,16 @@ public static class OutboxMetrics
     public static readonly Counter<long> Failed =
         Meter.CreateCounter<long>("outbox.failed");
 
-    public static readonly Histogram<double> PublishDuration =
+    public static readonly Counter<long> OwnershipConflicts =
+        Meter.CreateCounter<long>("outbox.ownership.conflicts");
+
+    public static readonly Histogram<double> PublishBatchDuration =
         Meter.CreateHistogram<double>(
-            "outbox.publish.duration",
+            "outbox.publish.batch.duration",
             unit: "s");
+
+    public static readonly Histogram<int> PublishBatchSize =
+        Meter.CreateHistogram<int>(
+            "outbox.publish.batch.size",
+            unit: "{message}");
 }
