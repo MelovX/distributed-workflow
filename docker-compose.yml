@@ -146,7 +146,6 @@ services:
             dockerfile: DistributedWorkflow.Worker/Dockerfile
         environment:
             DOTNET_ENVIRONMENT: Production
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             RabbitMq__HostName: rabbitmq
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
@@ -156,10 +155,6 @@ services:
             NumberingGrpc__Address: http://numbering-grpc:8080
             ASPNETCORE_URLS: http://+:8080
         depends_on:
-            postgres:
-                condition: service_started
-            migrations:
-                condition: service_completed_successfully
             rabbitmq:
                 condition: service_healthy
             redpanda:
@@ -175,14 +170,13 @@ services:
         build:
             context: .
             dockerfile: DistributedWorkflow.Api/Dockerfile
-        container_name: distributed-workflow-api
+        deploy:
+            replicas: 3
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=40;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=25;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             ConnectionStrings__Redis: redis:6379
-        ports:
-            - "5268:8080"
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
             interval: 10s
@@ -198,6 +192,27 @@ services:
                 condition: service_started
         restart: on-failure
 
+    load-balancer:
+        profiles:
+            - apps
+        image: haproxy:3.2-alpine
+        container_name: distributed-workflow-load-balancer
+        ports:
+            - "5268:8080"
+            - "8404:8404"
+        volumes:
+            - ./infrastructure/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+        healthcheck:
+            test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8404/metrics"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 5s
+        depends_on:
+            api:
+                condition: service_healthy
+        restart: unless-stopped
+
     outbox-publisher:
         profiles:
             - apps
@@ -208,7 +223,7 @@ services:
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
-            ConnectionStrings__OutboxDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            ConnectionStrings__OutboxDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             RabbitMq__HostName: rabbitmq
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest

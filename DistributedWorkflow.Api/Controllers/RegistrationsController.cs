@@ -31,16 +31,6 @@ namespace DistributedWorkflow.Api.Controllers
                 return BadRequest("Idempotency-Key header is required.");
             }
 
-            var existingOperation = await _dbContext.RegistrationOperations
-                .FirstOrDefaultAsync(x => x.IdempotencyKey == idempotencyKey, cancellationToken);
-
-            if (existingOperation is not null)
-            {
-                return Accepted(new RegisterDocumentResponse(
-                    OperationId: existingOperation.Id,
-                    Status: existingOperation.Status));
-            }
-
             var now = DateTimeOffset.UtcNow;
             var operationId = Guid.NewGuid().ToString("N");
 
@@ -69,8 +59,8 @@ namespace DistributedWorkflow.Api.Controllers
                 PublishedAt = null
             };
 
-            await _dbContext.RegistrationOperations.AddAsync(operation, cancellationToken);
-            await _dbContext.OutboxMessages.AddAsync(outboxMessage, cancellationToken);
+            _dbContext.RegistrationOperations.Add(operation);
+            _dbContext.OutboxMessages.Add(outboxMessage);
 
             try
             {

@@ -1,19 +1,12 @@
 using DistributedWorkflow.Numbering.Grpc;
 using DistributedWorkflow.Worker;
 using DistributedWorkflow.Worker.Configuration;
-using DistributedWorkflow.Worker.Data;
-using DistributedWorkflow.Worker.Services;
-using Microsoft.EntityFrameworkCore;
 using DistributedWorkflow.Worker.Metrics;
+using DistributedWorkflow.Worker.Services;
 using Microsoft.AspNetCore.Builder;
 using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
-
-var registrationDbConnectionString =
-    builder.Configuration.GetConnectionString("RegistrationDb")
-    ?? throw new InvalidOperationException(
-        "Connection string 'RegistrationDb' is not configured.");
 
 var numberingGrpcAddressValue =
     builder.Configuration["NumberingGrpc:Address"]
@@ -86,11 +79,6 @@ builder.Services
         options => !string.IsNullOrWhiteSpace(options.TopicName),
         "Kafka:TopicName is required.")
     .ValidateOnStart();
-
-builder.Services.AddDbContext<RegistrationDbContext>(options =>
-{
-    options.UseNpgsql(registrationDbConnectionString);
-});
 
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<KafkaDocumentEventPublisher>();

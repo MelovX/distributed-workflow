@@ -49,11 +49,11 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 3,
-        "w": 6,
-        "x": 0,
-        "y": 0
+    "gridPos": {
+      "h": 3,
+      "w": 4,
+      "x": 0,
+      "y": 0
       },
       "id": 1,
       "options": {
@@ -76,8 +76,9 @@
           "editorMode": "code",
           "expr": "up{job=\"distributed-workflow-api\"}",
           "legendFormat": "API",
-          "range": true,
-          "refId": "A"
+        "instant": true,
+        "range": false,
+        "refId": "A"
         }
       ],
       "title": "API",
@@ -124,11 +125,11 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 3,
-        "w": 6,
-        "x": 6,
-        "y": 0
+    "gridPos": {
+      "h": 3,
+      "w": 4,
+      "x": 8,
+      "y": 0
       },
       "id": 2,
       "options": {
@@ -151,14 +152,91 @@
           "editorMode": "code",
           "expr": "up{job=\"distributed-workflow-worker\"}",
           "legendFormat": "Worker",
-          "range": true,
-          "refId": "A"
+        "instant": true,
+        "range": false,
+        "refId": "A"
         }
       ],
-      "title": "Worker",
-      "type": "stat"
+    "title": "Worker",
+    "type": "stat"
+  },
+  {
+    "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
     },
-    {
+    "fieldConfig": {
+      "defaults": {
+        "color": {
+          "mode": "thresholds"
+        },
+        "mappings": [
+          {
+            "options": {
+              "0": {
+                "color": "red",
+                "text": "DOWN"
+              },
+              "1": {
+                "color": "green",
+                "text": "UP"
+              }
+            },
+            "type": "value"
+          }
+        ],
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {
+              "color": "red",
+              "value": null
+            },
+            {
+              "color": "green",
+              "value": 1
+            }
+          ]
+        }
+      },
+      "overrides": []
+    },
+    "gridPos": {
+      "h": 3,
+      "w": 4,
+      "x": 4,
+      "y": 0
+    },
+    "id": 11,
+    "options": {
+      "colorMode": "background",
+      "graphMode": "none",
+      "justifyMode": "center",
+      "orientation": "auto",
+      "reduceOptions": {
+        "calcs": [
+          "lastNotNull"
+        ],
+        "fields": "",
+        "values": false
+      },
+      "textMode": "auto",
+      "wideLayout": true
+    },
+    "targets": [
+      {
+        "editorMode": "code",
+        "expr": "up{job=\"distributed-workflow-outbox-publisher\"}",
+        "instant": true,
+        "legendFormat": "Publisher",
+        "range": false,
+        "refId": "A"
+      }
+    ],
+    "title": "Publisher",
+    "type": "stat"
+  },
+  {
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -199,10 +277,10 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 3,
-        "w": 6,
-        "x": 12,
+    "gridPos": {
+      "h": 3,
+      "w": 4,
+      "x": 12,
         "y": 0
       },
       "id": 3,
@@ -226,8 +304,9 @@
           "editorMode": "code",
           "expr": "up{job=\"distributed-workflow-rabbitmq\"}",
           "legendFormat": "RabbitMQ",
-          "range": true,
-          "refId": "A"
+        "instant": true,
+        "range": false,
+        "refId": "A"
         }
       ],
       "title": "RabbitMQ",
@@ -264,10 +343,10 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 3,
-        "w": 6,
-        "x": 18,
+    "gridPos": {
+      "h": 3,
+      "w": 8,
+      "x": 16,
         "y": 0
       },
       "id": 4,
@@ -291,8 +370,9 @@
           "editorMode": "code",
           "expr": "rabbitmq_queue_messages_ready",
           "legendFormat": "Ready",
-          "range": true,
-          "refId": "A"
+        "instant": true,
+        "range": false,
+        "refId": "A"
         }
       ],
       "title": "RabbitMQ Ready",
@@ -806,6 +886,259 @@
         }
       ],
       "title": "Process Working Set",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (job) (db_client_connections_usage{state=\"used\"})",
+          "legendFormat": "{{job}} used",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (job) (db_client_connections_usage{state=\"idle\"})",
+          "legendFormat": "{{job}} idle",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (job) (db_client_connections_max)",
+          "legendFormat": "{{job}} max",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "PostgreSQL Connection Pools",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (job) (db_client_connections_pending_requests)",
+          "legendFormat": "{{job}} waiting",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "PostgreSQL Pool Waiters",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (job) (rate(db_client_commands_duration_seconds_sum[$__rate_interval])) / sum by (job) (rate(db_client_commands_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "{{job}} mean",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (job, le) (rate(db_client_commands_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{job}} p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "PostgreSQL Command Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (job) (db_client_commands_executing)",
+          "legendFormat": "{{job}} executing",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "PostgreSQL Executing Commands",
       "type": "timeseries"
     }
   ],

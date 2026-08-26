@@ -3,12 +3,12 @@ using NBomber.Http.CSharp;
 
 var baseUrl = Environment.GetEnvironmentVariable("LOAD_TEST_BASE_URL")
     ?? "http://localhost:5268";
-var rate = ReadPositiveInteger("LOAD_TEST_RATE", defaultValue: 10);
+var rate = ReadPositiveInteger("LOAD_TEST_RATE", defaultValue: 2000);
 var durationSeconds = ReadPositiveInteger(
     "LOAD_TEST_DURATION_SECONDS",
-    defaultValue: 30);
+    defaultValue: 300);
 
-var httpClient = Http.CreateDefaultClient();
+var httpClient = Http.CreateDefaultClient(maxConnectionsPerServer: 512);
 
 var scenario = Scenario.Create("register_document", async _ =>
 {
@@ -25,8 +25,11 @@ var scenario = Scenario.Create("register_document", async _ =>
 
     return await Http.Send(httpClient, request);
 })
-.WithWarmUpDuration(TimeSpan.FromSeconds(5))
 .WithLoadSimulations(
+    Simulation.RampingInject(
+        rate: rate,
+        interval: TimeSpan.FromSeconds(1),
+        during: TimeSpan.FromSeconds(30)),
     Simulation.Inject(
         rate: rate,
         interval: TimeSpan.FromSeconds(1),

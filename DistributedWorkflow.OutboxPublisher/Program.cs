@@ -15,6 +15,7 @@ builder.Services.AddOpenTelemetry()
     {
         metrics
             .AddMeter(OutboxMetrics.MeterName)
+            .AddMeter("Npgsql")
             .AddAspNetCoreInstrumentation()
             .AddRuntimeInstrumentation()
             .AddView(
@@ -25,6 +26,25 @@ builder.Services.AddOpenTelemetry()
                     [
                         0.001,
                         0.002,
+                        0.005,
+                        0.010,
+                        0.025,
+                        0.050,
+                        0.100,
+                        0.250,
+                        0.500,
+                        1.000,
+                        2.500,
+                        5.000
+                    ]
+                })
+            .AddView(
+                "db.client.commands.duration",
+                new ExplicitBucketHistogramConfiguration
+                {
+                    Boundaries =
+                    [
+                        0.001,
                         0.005,
                         0.010,
                         0.025,

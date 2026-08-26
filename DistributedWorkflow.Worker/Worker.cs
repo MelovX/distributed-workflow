@@ -1,18 +1,16 @@
 using DistributedWorkflow.Numbering.Grpc;
 using DistributedWorkflow.Worker.Configuration;
-using DistributedWorkflow.Worker.Data;
 using DistributedWorkflow.Worker.Events;
+using DistributedWorkflow.Worker.Metrics;
 using DistributedWorkflow.Worker.Models;
 using DistributedWorkflow.Worker.Services;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using System.Text;
-using System.Text.Json;
 using RabbitMQ.Client.Exceptions;
 using System.Diagnostics;
-using DistributedWorkflow.Worker.Metrics;
+using System.Text;
+using System.Text.Json;
 
 namespace DistributedWorkflow.Worker;
 
@@ -23,7 +21,6 @@ public sealed class Worker : BackgroundService
     private const string _routingKey = "registration.register";
     private const ushort ConsumerConcurrency = 8;
 
-    private readonly IServiceScopeFactory _scopeFactory;
     private readonly KafkaDocumentEventPublisher _kafkaPublisher;
     private readonly NumberingService.NumberingServiceClient _numberingClient;
     private readonly RabbitMqOptions _rabbitMqOptions;
@@ -36,13 +33,11 @@ public sealed class Worker : BackgroundService
     private IChannel? _channel;
 
     public Worker(
-        IServiceScopeFactory scopeFactory, 
         KafkaDocumentEventPublisher documentEventPublisher,
         NumberingService.NumberingServiceClient numberingServiceClient,
         IOptions<RabbitMqOptions> rabbitMqOptions,
         ILogger<Worker> logger)
     {
-        _scopeFactory = scopeFactory;
         _kafkaPublisher = documentEventPublisher;
         _numberingClient = numberingServiceClient;
         _rabbitMqOptions = rabbitMqOptions.Value;
@@ -116,41 +111,6 @@ public sealed class Worker : BackgroundService
                     return;
                 }
 
-                await using var scope = _scopeFactory.CreateAsyncScope();
-                var dbContext = scope.ServiceProvider.GetRequiredService<RegistrationDbContext>();
-
-                var operation = await dbContext.RegistrationOperations
-                    .FirstOrDefaultAsync(x => x.Id == command.OperationId, stoppingToken);
-
-                if (operation is null)
-                {
-                    _logger.LogWarning(
-                        "Operation not found. OperationId={OperationId}",
-                        command.OperationId);
-
-                    await RejectAsync(
-                        eventArgs.DeliveryTag,
-                        stoppingToken);
-
-                    return;
-                }
-
-                if (operation.Status == "Succeeded")
-                {
-                    _logger.LogDebug(
-                        "Operation already succeeded. OperationId={OperationId}",
-                        command.OperationId);
-
-                    await AcknowledgeAsync(
-                        eventArgs.DeliveryTag,
-                        stoppingToken);
-
-                    return;
-                }
-
-                operation.Status = "InProgress";
-                await dbContext.SaveChangesAsync(stoppingToken);
-
                 _logger.LogDebug(
                     "Registration started. OperationId={OperationId}, DocumentId={DocumentId}",
                     command.OperationId,
@@ -169,9 +129,6 @@ public sealed class Worker : BackgroundService
                     "Number reserved via gRPC. OperationId={OperationId}, Status={Status}",
                     command.OperationId,
                     reserveNumberResponse.Status);
-
-                operation.Status = "Succeeded";
-                await dbContext.SaveChangesAsync(stoppingToken);
 
                 await _kafkaPublisher.PublishAsync(
                     new DocumentRegisteredEvent
