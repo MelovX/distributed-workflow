@@ -1,3 +1,4 @@
+using DistributedWorkflow.Api.Batching;
 using DistributedWorkflow.Api.Data;
 using DistributedWorkflow.Api.HealthChecks;
 using DistributedWorkflow.Api.Metrics;
@@ -36,6 +37,31 @@ if (runMigrations)
 
     return;
 }
+
+builder.Services
+    .AddOptions<RegistrationBatchOptions>()
+    .Bind(
+        builder.Configuration.GetSection(
+            RegistrationBatchOptions.SectionName))
+    .Validate(
+        options => options.MaxBatchSize > 0,
+        "RegistrationBatch:MaxBatchSize must be greater than zero.")
+    .Validate(
+        options => options.MaxBatchDelay > TimeSpan.Zero,
+        "RegistrationBatch:MaxBatchDelay must be greater than zero.")
+    .Validate(
+        options => options.Capacity >= options.MaxBatchSize,
+        "RegistrationBatch:Capacity must be greater than or equal to MaxBatchSize.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<RegistrationWriteQueue>();
+builder.Services.AddSingleton<IRegistrationWriteQueue>(
+    serviceProvider =>
+        serviceProvider.GetRequiredService<RegistrationWriteQueue>());
+builder.Services.AddSingleton<RegistrationBatchReader>();
+builder.Services.AddSingleton<
+    IRegistrationBatchStore, RegistrationBatchStore>();
+builder.Services.AddHostedService<
+    RegistrationBatchWriter>();
 
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>

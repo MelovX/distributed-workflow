@@ -190,6 +190,9 @@ services:
             ASPNETCORE_URLS: http://+:8080
             ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=25;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             ConnectionStrings__Redis: redis:6379
+            RegistrationBatch__MaxBatchSize: 64
+            RegistrationBatch__MaxBatchDelay: "00:00:00.005"
+            RegistrationBatch__Capacity: 20000
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
             interval: 10s

@@ -1,10 +1,8 @@
-﻿using DistributedWorkflow.Api.Data;
-using DistributedWorkflow.Api.Data.Entities;
-using DistributedWorkflow.Api.Metrics;
+﻿using DistributedWorkflow.Api.Batching;
+using DistributedWorkflow.Api.Data;
 using DistributedWorkflow.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using System.Text.Json;
 
 namespace DistributedWorkflow.Api.Controllers
@@ -14,10 +12,14 @@ namespace DistributedWorkflow.Api.Controllers
     public sealed class RegistrationsController : ControllerBase
     {
         private readonly RegistrationDbContext _dbContext;
+        private readonly IRegistrationWriteQueue _registrationWriteQueue;
 
-        public RegistrationsController(RegistrationDbContext dbContext)
+        public RegistrationsController(
+            RegistrationDbContext dbContext,
+            IRegistrationWriteQueue registrationWriteQueue)
         {
             _dbContext = dbContext;
+            _registrationWriteQueue = registrationWriteQueue;
         }
 
         [HttpPost]
@@ -40,59 +42,27 @@ namespace DistributedWorkflow.Api.Controllers
                 Title: request.Title,
                 CreatedAt: now);
 
-            var operation = new RegistrationOperation
-            {
-                Id = operationId,
-                IdempotencyKey = idempotencyKey,
-                DocumentId = request.DocumentId,
-                Title = request.Title,
-                Status = "Pending",
-                CreatedAt = now
-            };
+            var writeRequest =
+                new RegistrationWriteRequest(
+                    new RegistrationOperationWriteModel(
+                        operationId,
+                        idempotencyKey,
+                        request.DocumentId,
+                        request.Title,
+                        "Pending",
+                        now),
+                    new OutboxMessageWriteModel(
+                        Guid.NewGuid(),
+                        nameof(RegisterDocumentCommand),
+                        JsonSerializer.Serialize(command),
+                        now));
 
-            var outboxMessage = new OutboxMessage
-            {
-                Id = Guid.NewGuid(),
-                Type = nameof(RegisterDocumentCommand),
-                Payload = JsonSerializer.Serialize(command),
-                CreatedAt = now,
-                PublishedAt = null
-            };
+            var response =
+                await _registrationWriteQueue.EnqueueAsync(
+                    writeRequest,
+                    cancellationToken);
 
-            _dbContext.RegistrationOperations.Add(operation);
-            _dbContext.OutboxMessages.Add(outboxMessage);
-
-            try
-            {
-                await _dbContext.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException exception)
-                when (exception.InnerException is PostgresException postgresException
-                      && postgresException.SqlState ==
-                         PostgresErrorCodes.UniqueViolation
-                      && postgresException.ConstraintName ==
-                         "IX_RegistrationOperations_IdempotencyKey")
-            {
-                _dbContext.ChangeTracker.Clear();
-
-                var concurrentOperation =
-                    await _dbContext.RegistrationOperations
-                        .AsNoTracking()
-                        .SingleAsync(
-                            operation =>
-                                operation.IdempotencyKey == idempotencyKey,
-                            cancellationToken);
-
-                return Accepted(new RegisterDocumentResponse(
-                    OperationId: concurrentOperation.Id,
-                    Status: concurrentOperation.Status));
-            }
-
-            RegistrationMetrics.RegistrationsCreated.Add(1);
-
-            return Accepted(new RegisterDocumentResponse(
-                OperationId: command.OperationId,
-                Status: "Pending"));
+            return Accepted(response);
         }
 
         [HttpGet("{operationId}")]

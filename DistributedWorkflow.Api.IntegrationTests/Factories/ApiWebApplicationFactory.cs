@@ -1,8 +1,5 @@
 ﻿using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace DistributedWorkflow.Api.IntegrationTests.Factories
 {
@@ -36,10 +33,6 @@ namespace DistributedWorkflow.Api.IntegrationTests.Factories
                 "ConnectionStrings:Redis",
                 _redisConnectionString);
 
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IHostedService>();
-            });
         }
     }
 }

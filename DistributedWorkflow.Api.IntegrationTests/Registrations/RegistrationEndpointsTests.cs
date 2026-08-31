@@ -296,6 +296,125 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
         }
 
         [Fact]
+        public async Task Register_WhenDistinctRequestsAreSubmittedConcurrently_PersistsEntireBatch()
+        {
+            const int requestCount = 16;
+
+            using var factory = new ApiWebApplicationFactory(
+                _fixture.Container.GetConnectionString(),
+                "localhost:1,abortConnect=false");
+
+            using var client = factory.CreateClient();
+
+            var idempotencyKeys = Enumerable.Range(0, requestCount)
+                .Select(_ => Guid.NewGuid().ToString("N"))
+                .ToArray();
+
+            var httpRequests = idempotencyKeys
+                .Select((idempotencyKey, index) =>
+                {
+                    var httpRequest = new HttpRequestMessage(
+                        HttpMethod.Post,
+                        "/registrations");
+
+                    httpRequest.Content = JsonContent.Create(
+                        new RegisterDocumentRequest(
+                            $"batch-document-{index}",
+                            $"Batch document {index}"));
+
+                    httpRequest.Headers.Add(
+                        "Idempotency-Key",
+                        idempotencyKey);
+
+                    return httpRequest;
+                })
+                .ToArray();
+
+            HttpResponseMessage[]? responses = null;
+
+            try
+            {
+                responses = await Task.WhenAll(
+                    httpRequests.Select(httpRequest =>
+                        client.SendAsync(
+                            httpRequest,
+                            TestContext.Current.CancellationToken)));
+
+                Assert.All(
+                    responses,
+                    response => Assert.Equal(
+                        HttpStatusCode.Accepted,
+                        response.StatusCode));
+
+                var responseBodies = await Task.WhenAll(
+                    responses.Select(response =>
+                        response.Content.ReadFromJsonAsync<
+                            RegisterDocumentResponse>(
+                                cancellationToken:
+                                    TestContext.Current.CancellationToken)));
+
+                Assert.All(responseBodies, Assert.NotNull);
+
+                var operationIds = responseBodies
+                    .Select(response => response!.OperationId)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                Assert.Equal(requestCount, operationIds.Count);
+
+                var options =
+                    new DbContextOptionsBuilder<RegistrationDbContext>()
+                        .UseNpgsql(
+                            _fixture.Container.GetConnectionString())
+                        .Options;
+
+                await using var dbContext =
+                    new RegistrationDbContext(options);
+
+                var operations = await dbContext.RegistrationOperations
+                    .AsNoTracking()
+                    .Where(operation =>
+                        idempotencyKeys.Contains(
+                            operation.IdempotencyKey))
+                    .ToListAsync(TestContext.Current.CancellationToken);
+
+                Assert.Equal(requestCount, operations.Count);
+
+                var outboxMessages = await dbContext.OutboxMessages
+                    .AsNoTracking()
+                    .Where(message =>
+                        message.Type == nameof(RegisterDocumentCommand))
+                    .ToListAsync(TestContext.Current.CancellationToken);
+
+                var matchingOutboxCount = outboxMessages.Count(message =>
+                {
+                    var command =
+                        JsonSerializer.Deserialize<RegisterDocumentCommand>(
+                            message.Payload);
+
+                    return command is not null
+                           && operationIds.Contains(command.OperationId);
+                });
+
+                Assert.Equal(requestCount, matchingOutboxCount);
+            }
+            finally
+            {
+                foreach (var httpRequest in httpRequests)
+                {
+                    httpRequest.Dispose();
+                }
+
+                if (responses is not null)
+                {
+                    foreach (var response in responses)
+                    {
+                        response.Dispose();
+                    }
+                }
+            }
+        }
+
+        [Fact]
         public async Task GetStatus_WhenOperationExists_ReturnsOkWithOperationStatus()
         {
             // Arrange
