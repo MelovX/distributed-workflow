@@ -11,5 +11,7 @@
         public string UserName { get; init; } = string.Empty;
 
         public string Password { get; init; } = string.Empty;
+
+        public ushort ConsumerConcurrency { get; init; } = 8;
     }
 }

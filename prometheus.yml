@@ -6,9 +6,18 @@ scrape_configs:
     metric_name_validation_scheme: legacy
     metric_name_escaping_scheme: underscores
     metrics_path: /metrics
+    dns_sd_configs:
+      - names:
+          - api
+        type: A
+        port: 8080
+        refresh_interval: 5s
+
+  - job_name: distributed-workflow-load-balancer
+    metrics_path: /metrics
     static_configs:
       - targets:
-          - host.docker.internal:5268
+          - load-balancer:8404
 
   - job_name: distributed-workflow-worker
     metric_name_validation_scheme: legacy
@@ -17,6 +26,17 @@ scrape_configs:
     dns_sd_configs:
       - names:
           - worker
+        type: A
+        port: 8080
+        refresh_interval: 5s
+
+  - job_name: distributed-workflow-outbox-publisher
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names:
+          - outbox-publisher
         type: A
         port: 8080
         refresh_interval: 5s

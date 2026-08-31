@@ -8,6 +8,15 @@ namespace DistributedWorkflow.Worker.Metrics
         public const string RegistrationProcessingDurationName =
             "worker.registration.processing.duration";
 
+        public const string NumberingRequestDurationName =
+            "worker.numbering.request.duration";
+
+        public const string KafkaPublishDurationName =
+            "worker.kafka.publish.duration";
+
+        public const string RabbitMqAcknowledgementDurationName =
+            "worker.rabbitmq.acknowledgement.duration";
+
         public static readonly Meter Meter = new(MeterName, "1.0.0");
 
         public static readonly Counter<long> RegistrationsCompleted =
@@ -15,5 +24,14 @@ namespace DistributedWorkflow.Worker.Metrics
 
         public static readonly Histogram<double> RegistrationProcessingDuration =
             Meter.CreateHistogram<double>(RegistrationProcessingDurationName, unit: "s");
+
+        public static readonly Histogram<double> NumberingRequestDuration =
+            Meter.CreateHistogram<double>(NumberingRequestDurationName, unit: "s");
+
+        public static readonly Histogram<double> KafkaPublishDuration =
+            Meter.CreateHistogram<double>(KafkaPublishDurationName, unit: "s");
+
+        public static readonly Histogram<double> RabbitMqAcknowledgementDuration =
+            Meter.CreateHistogram<double>(RabbitMqAcknowledgementDurationName, unit: "s");
     }
 }

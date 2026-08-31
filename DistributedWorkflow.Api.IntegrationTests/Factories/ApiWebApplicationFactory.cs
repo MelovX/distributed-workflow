@@ -1,8 +1,5 @@
 ﻿using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace DistributedWorkflow.Api.IntegrationTests.Factories
 {
@@ -36,15 +33,6 @@ namespace DistributedWorkflow.Api.IntegrationTests.Factories
                 "ConnectionStrings:Redis",
                 _redisConnectionString);
 
-            builder.UseSetting("RabbitMq:HostName", "localhost");
-            builder.UseSetting("RabbitMq:Port", "1");
-            builder.UseSetting("RabbitMq:UserName", "test");
-            builder.UseSetting("RabbitMq:Password", "test");
-
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IHostedService>();
-            });
         }
     }
 }

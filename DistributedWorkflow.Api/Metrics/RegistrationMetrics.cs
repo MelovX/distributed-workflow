@@ -11,10 +11,5 @@ namespace DistributedWorkflow.Api.Metrics
         public static readonly Counter<long> RegistrationsCreated =
             Meter.CreateCounter<long>("registrations.created");
 
-        public static readonly Counter<long> OutboxPublished =
-            Meter.CreateCounter<long>("outbox.published");
-
-        public static readonly Counter<long> OutboxFailed =
-            Meter.CreateCounter<long>("outbox.failed");
     }
 }

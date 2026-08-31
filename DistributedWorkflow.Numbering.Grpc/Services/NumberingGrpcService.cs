@@ -21,7 +21,7 @@ public sealed class NumberingGrpcService : NumberingService.NumberingServiceBase
 
         var number = $"REG-2026-{next:000000}";
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "Reserved number {Number} for DocumentId={DocumentId}, OperationId={OperationId}",
             number,
             request.DocumentId,

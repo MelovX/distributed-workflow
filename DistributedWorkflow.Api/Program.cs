@@ -1,8 +1,7 @@
-using DistributedWorkflow.Api.Configuration;
+using DistributedWorkflow.Api.Batching;
 using DistributedWorkflow.Api.Data;
 using DistributedWorkflow.Api.HealthChecks;
 using DistributedWorkflow.Api.Metrics;
-using DistributedWorkflow.Api.Services;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -39,11 +38,56 @@ if (runMigrations)
     return;
 }
 
+builder.Services
+    .AddOptions<RegistrationBatchOptions>()
+    .Bind(
+        builder.Configuration.GetSection(
+            RegistrationBatchOptions.SectionName))
+    .Validate(
+        options => options.MaxBatchSize > 0,
+        "RegistrationBatch:MaxBatchSize must be greater than zero.")
+    .Validate(
+        options => options.MaxBatchDelay > TimeSpan.Zero,
+        "RegistrationBatch:MaxBatchDelay must be greater than zero.")
+    .Validate(
+        options => options.Capacity >= options.MaxBatchSize,
+        "RegistrationBatch:Capacity must be greater than or equal to MaxBatchSize.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<RegistrationWriteQueue>();
+builder.Services.AddSingleton<IRegistrationWriteQueue>(
+    serviceProvider =>
+        serviceProvider.GetRequiredService<RegistrationWriteQueue>());
+builder.Services.AddSingleton<RegistrationBatchReader>();
+builder.Services.AddSingleton<
+    IRegistrationBatchStore, RegistrationBatchStore>();
+builder.Services.AddHostedService<
+    RegistrationBatchWriter>();
+
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
         metrics
             .AddMeter(RegistrationMetrics.MeterName)
+            .AddMeter("Npgsql")
+            .AddView(
+                "db.client.commands.duration",
+                new ExplicitBucketHistogramConfiguration
+                {
+                    Boundaries =
+                    [
+                        0.001,
+                        0.005,
+                        0.010,
+                        0.025,
+                        0.050,
+                        0.100,
+                        0.250,
+                        0.500,
+                        1.000,
+                        2.500,
+                        5.000
+                    ]
+                })
             .AddAspNetCoreInstrumentation()
             .AddHttpClientInstrumentation()
             .AddRuntimeInstrumentation()
@@ -54,46 +98,11 @@ var redisConnectionString =
     builder.Configuration.GetConnectionString("Redis")
     ?? throw new InvalidOperationException(
         "Connection string 'Redis' is not configured.");
-builder.Services
-    .AddOptions<RabbitMqOptions>()
-    .Bind(builder.Configuration.GetSection(RabbitMqOptions.SectionName))
-    .Validate(
-        options => !string.IsNullOrWhiteSpace(options.HostName),
-        "RabbitMq:HostName is required.")
-    .Validate(
-        options => options.Port is > 0 and <= 65535,
-        "RabbitMq:Port must be a valid TCP port.")
-    .Validate(
-        options => !string.IsNullOrWhiteSpace(options.UserName),
-        "RabbitMq:UserName is required.")
-    .Validate(
-        options => !string.IsNullOrWhiteSpace(options.Password),
-        "RabbitMq:Password is required.")
-    .ValidateOnStart();
-
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<IConnectionMultiplexer>(
     _ => ConnectionMultiplexer.Connect(redisConnectionString));
-builder.Services.AddTransient<RabbitMqRegistrationPublisher>();
-
-var outboxDispatcherCount = builder.Configuration.GetValue(
-    "Outbox:DispatcherCount",
-    1);
-
-if (outboxDispatcherCount < 1)
-{
-    throw new InvalidOperationException(
-        "Outbox:DispatcherCount must be greater than zero.");
-}
-
-for (var index = 0; index < outboxDispatcherCount; index++)
-{
-    builder.Services.AddSingleton<IHostedService>(serviceProvider =>
-        ActivatorUtilities.CreateInstance<OutboxDispatcher>(serviceProvider));
-}
-
 builder.Services.AddDbContext<RegistrationDbContext>(options =>
 {
     options.UseNpgsql(registrationDbConnectionString);

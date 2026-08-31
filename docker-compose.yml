@@ -23,6 +23,18 @@ services:
     postgres:
         image: postgres:16
         container_name: distributed-workflow-postgres
+        command:
+            - postgres
+            - -c
+            - shared_buffers=1GB
+            - -c
+            - max_wal_size=8GB
+            - -c
+            - checkpoint_timeout=15min
+            - -c
+            - checkpoint_completion_target=0.9
+            - -c
+            - wal_buffers=16MB
         ports:
             - "5433:5432"
         environment:
@@ -146,20 +158,16 @@ services:
             dockerfile: DistributedWorkflow.Worker/Dockerfile
         environment:
             DOTNET_ENVIRONMENT: Production
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             RabbitMq__HostName: rabbitmq
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
+            RabbitMq__ConsumerConcurrency: 24
             Kafka__BootstrapServers: redpanda:9092
             Kafka__TopicName: document-registered
             NumberingGrpc__Address: http://numbering-grpc:8080
             ASPNETCORE_URLS: http://+:8080
         depends_on:
-            postgres:
-                condition: service_started
-            migrations:
-                condition: service_completed_successfully
             rabbitmq:
                 condition: service_healthy
             redpanda:
@@ -175,19 +183,16 @@ services:
         build:
             context: .
             dockerfile: DistributedWorkflow.Api/Dockerfile
-        container_name: distributed-workflow-api
+        deploy:
+            replicas: 3
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=40;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=25;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             ConnectionStrings__Redis: redis:6379
-            RabbitMq__HostName: rabbitmq
-            RabbitMq__Port: 5672
-            RabbitMq__UserName: guest
-            RabbitMq__Password: guest
-            Outbox__DispatcherCount: 16
-        ports:
-            - "5268:8080"
+            RegistrationBatch__MaxBatchSize: 64
+            RegistrationBatch__MaxBatchDelay: "00:00:00.005"
+            RegistrationBatch__Capacity: 20000
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
             interval: 10s
@@ -201,6 +206,56 @@ services:
                 condition: service_completed_successfully
             redis:
                 condition: service_started
+        restart: on-failure
+
+    load-balancer:
+        profiles:
+            - apps
+        image: haproxy:3.2-alpine
+        container_name: distributed-workflow-load-balancer
+        ports:
+            - "5268:8080"
+            - "8404:8404"
+        volumes:
+            - ./infrastructure/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+        healthcheck:
+            test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8404/metrics"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 5s
+        depends_on:
+            api:
+                condition: service_healthy
+        restart: unless-stopped
+
+    outbox-publisher:
+        profiles:
+            - apps
+        image: distributed-workflow-outbox-publisher:local
+        build:
+            context: .
+            dockerfile: DistributedWorkflow.OutboxPublisher/Dockerfile
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__OutboxDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            RabbitMq__HostName: rabbitmq
+            RabbitMq__Port: 5672
+            RabbitMq__UserName: guest
+            RabbitMq__Password: guest
+            Outbox__DispatcherCount: 8
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 15s
+        depends_on:
+            postgres:
+                condition: service_healthy
+            migrations:
+                condition: service_completed_successfully
             rabbitmq:
                 condition: service_healthy
         restart: on-failure
