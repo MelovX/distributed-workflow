@@ -2,7 +2,6 @@
 using DistributedWorkflow.Api.Data;
 using DistributedWorkflow.Api.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace DistributedWorkflow.Api.Controllers
@@ -11,14 +10,14 @@ namespace DistributedWorkflow.Api.Controllers
     [Route("registrations")]
     public sealed class RegistrationsController : ControllerBase
     {
-        private readonly RegistrationDbContext _dbContext;
+        private readonly RegistrationQueryStore _queryStore;
         private readonly IRegistrationWriteQueue _registrationWriteQueue;
 
         public RegistrationsController(
-            RegistrationDbContext dbContext,
+            RegistrationQueryStore queryStore,
             IRegistrationWriteQueue registrationWriteQueue)
         {
-            _dbContext = dbContext;
+            _queryStore = queryStore;
             _registrationWriteQueue = registrationWriteQueue;
         }
 
@@ -74,12 +73,8 @@ namespace DistributedWorkflow.Api.Controllers
                 return BadRequest("operationId is required.");
             }
 
-            var operation = await _dbContext.RegistrationOperations
-                                    .AsNoTracking()
-                                    .SingleOrDefaultAsync(
-                                        operation =>
-                                            operation.Id == operationId,
-                                        cancellationToken);
+            var operation = await _queryStore.FindByOperationIdAsync(
+                operationId, cancellationToken);
 
             if (operation is null)
             {
@@ -87,8 +82,8 @@ namespace DistributedWorkflow.Api.Controllers
             }
 
             return Ok(new RegisterDocumentResponse(
-                OperationId: operation.Id,
-                Status: operation.Status));
+                OperationId: operation.Value.OperationId,
+                Status: operation.Value.Status));
         }
     }
 }

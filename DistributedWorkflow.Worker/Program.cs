@@ -4,9 +4,17 @@ using DistributedWorkflow.Worker.Configuration;
 using DistributedWorkflow.Worker.Metrics;
 using DistributedWorkflow.Worker.Services;
 using Microsoft.AspNetCore.Builder;
+using Npgsql;
 using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var workerDbConnectionString =
+    builder.Configuration.GetConnectionString("WorkerDb")
+    ?? throw new InvalidOperationException(
+        "Connection string 'WorkerDb' is not configured.");
+builder.Services.AddSingleton(
+    _ => NpgsqlDataSource.Create(workerDbConnectionString));
 
 var numberingGrpcAddressValue =
     builder.Configuration["NumberingGrpc:Address"]

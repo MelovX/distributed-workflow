@@ -1,20 +1,16 @@
-﻿using DistributedWorkflow.Api.Data;
-using DistributedWorkflow.Api.Metrics;
-using Microsoft.EntityFrameworkCore;
+﻿using DistributedWorkflow.Api.Metrics;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace DistributedWorkflow.Api.Batching
 {
-    internal sealed class RegistrationBatchStore :
-        IRegistrationBatchStore
+    internal sealed class RegistrationBatchStore : IRegistrationBatchStore
     {
-        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly NpgsqlDataSource _dataSource;
 
-        public RegistrationBatchStore(
-            IServiceScopeFactory scopeFactory)
+        public RegistrationBatchStore(NpgsqlDataSource dataSource)
         {
-            _scopeFactory = scopeFactory;
+            _dataSource = dataSource;
         }
 
         public async Task<IReadOnlyList<RegistrationWriteResult>> WriteAsync(
@@ -26,55 +22,37 @@ namespace DistributedWorkflow.Api.Batching
                 return Array.Empty<RegistrationWriteResult>();
             }
 
-            await using var scope =
-                _scopeFactory.CreateAsyncScope();
+            await using var connection =
+                await _dataSource.OpenConnectionAsync(cancellationToken);
 
-            var dbContext =
-                scope.ServiceProvider
-                    .GetRequiredService<RegistrationDbContext>();
+            await using var transaction =
+                await connection.BeginTransactionAsync(
+                    cancellationToken);
 
-            await dbContext.Database.OpenConnectionAsync(
+            var insertedCount = await InsertNewRegistrationsAsync(
+                connection,
+                transaction,
+                requests,
                 cancellationToken);
 
-            try
+            var results = await ReadResultsAsync(
+                connection,
+                transaction,
+                requests,
+                cancellationToken);
+
+            if (results.Count != requests.Count)
             {
-                var connection =
-                    (NpgsqlConnection)dbContext.Database
-                        .GetDbConnection();
-
-                await using var transaction =
-                    await connection.BeginTransactionAsync(
-                        cancellationToken);
-
-                var insertedCount = await InsertNewRegistrationsAsync(
-                    connection,
-                    transaction,
-                    requests,
-                    cancellationToken);
-
-                var results = await ReadResultsAsync(
-                    connection,
-                    transaction,
-                    requests,
-                    cancellationToken);
-
-                if (results.Count != requests.Count)
-                {
-                    throw new InvalidOperationException(
-                        "Not all registration batch results were found.");
-                }
-
-                await transaction.CommitAsync(cancellationToken);
-
-                RegistrationMetrics.RegistrationsCreated.Add(
-                    insertedCount);
-
-                return results;
+                throw new InvalidOperationException(
+                    "Not all registration batch results were found.");
             }
-            finally
-            {
-                await dbContext.Database.CloseConnectionAsync();
-            }
+
+            await transaction.CommitAsync(cancellationToken);
+
+            RegistrationMetrics.RegistrationsCreated.Add(
+                insertedCount);
+
+            return results;
         }
 
         private static async Task<int> InsertNewRegistrationsAsync(

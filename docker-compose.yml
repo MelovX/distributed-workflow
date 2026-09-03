@@ -50,17 +50,39 @@ services:
             retries: 12
             start_period: 5s
             
+    worker-postgres:
+        image: postgres:16
+        container_name: distributed-workflow-worker-postgres
+        ports:
+            - "5434:5432"
+        environment:
+            POSTGRES_DB: worker_db
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+        volumes:
+            - worker-postgres-data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres -d worker_db"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 5s
+            
     migrations:
         profiles:
             - apps
-        image: distributed-workflow-api:local
+        image: distributed-workflow-migrations:local
+        build:
+            context: .
+            dockerfile: DistributedWorkflow.Migrations/Dockerfile
         container_name: distributed-workflow-migrations
         environment:
-            ASPNETCORE_ENVIRONMENT: Production
-            RunMigrations: "true"
             ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            ConnectionStrings__WorkerDb: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
         depends_on:
             postgres:
+                condition: service_healthy
+            worker-postgres:
                 condition: service_healthy
         restart: "no"
 
@@ -167,6 +189,7 @@ services:
             Kafka__TopicName: document-registered
             NumberingGrpc__Address: http://numbering-grpc:8080
             ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__WorkerDb: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=100;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
         depends_on:
             rabbitmq:
                 condition: service_healthy
@@ -174,6 +197,8 @@ services:
                 condition: service_started
             numbering-grpc:
                 condition: service_started
+            migrations:
+                condition: service_completed_successfully
         restart: unless-stopped
     
     api:
@@ -262,6 +287,7 @@ services:
 
 volumes:
     postgres-data:
+    worker-postgres-data:
     redpanda-data:
     prometheus-data:
     grafana-data:
