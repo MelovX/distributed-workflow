@@ -1,6 +1,7 @@
 using DistributedWorkflow.Numbering.Grpc;
 using DistributedWorkflow.Worker;
 using DistributedWorkflow.Worker.Configuration;
+using DistributedWorkflow.Worker.Data;
 using DistributedWorkflow.Worker.Metrics;
 using DistributedWorkflow.Worker.Services;
 using Microsoft.AspNetCore.Builder;
@@ -15,6 +16,8 @@ var workerDbConnectionString =
         "Connection string 'WorkerDb' is not configured.");
 builder.Services.AddSingleton(
     _ => NpgsqlDataSource.Create(workerDbConnectionString));
+
+builder.Services.AddSingleton<WorkerInboxStore>();
 
 var numberingGrpcAddressValue =
     builder.Configuration["NumberingGrpc:Address"]
@@ -88,6 +91,7 @@ builder.Services
         options => options.ConsumerConcurrency > 0,
         "RabbitMq:ConsumerConcurrency must be greater than zero.")
     .ValidateOnStart();
+builder.Services.AddSingleton<RabbitMqRetryPublisher>();
 
 builder.Services
     .AddOptions<KafkaOptions>()

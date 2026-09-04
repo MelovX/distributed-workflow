@@ -10,6 +10,8 @@ services:
         container_name: distributed-workflow-rabbitmq
         volumes:
             - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+            - ./observability/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+            - ./observability/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
         ports:
             - "5673:5672"
             - "15672:15672"
