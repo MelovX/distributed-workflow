@@ -8,7 +8,6 @@ using DistributedWorkflow.Worker.Services;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using RabbitMQ.Client.Exceptions;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
@@ -53,49 +52,13 @@ public sealed class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var factory = new ConnectionFactory
-        {
-            HostName = _rabbitMqOptions.HostName,
-            Port = _rabbitMqOptions.Port,
-            UserName = _rabbitMqOptions.UserName,
-            Password = _rabbitMqOptions.Password,
-            AutomaticRecoveryEnabled = true,
-            TopologyRecoveryEnabled = true,
-            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
-            ClientProvidedName = "distributed-workflow-registration-worker",
-            ConsumerDispatchConcurrency = _rabbitMqOptions.ConsumerConcurrency
-        };
+        await ConnectToRabbitMQAsync(stoppingToken);
 
-        _connection = await ConnectWithRetryAsync(factory, stoppingToken);
-        _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
+        var channel = _channel
+            ?? throw new InvalidOperationException(
+                "RabbitMQ channel was not initialized.");
 
-        await _channel.ExchangeDeclareAsync(
-            exchange: _exchangeName,
-            type: ExchangeType.Direct,
-            durable: true,
-            autoDelete: false,
-            cancellationToken: stoppingToken);
-
-        await _channel.QueueDeclareAsync(
-            queue: _queueName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            cancellationToken: stoppingToken);
-
-        await _channel.QueueBindAsync(
-            queue: _queueName,
-            exchange: _exchangeName,
-            routingKey: _routingKey,
-            cancellationToken: stoppingToken);
-
-        await _channel.BasicQosAsync(
-            prefetchSize: 0,
-            prefetchCount: _rabbitMqOptions.ConsumerConcurrency,
-            global: false,
-            cancellationToken: stoppingToken);
-
-        var consumer = new AsyncEventingBasicConsumer(_channel);
+        var consumer = new AsyncEventingBasicConsumer(channel);
 
         consumer.ReceivedAsync += async (_, eventArgs) =>
         {
@@ -320,7 +283,7 @@ public sealed class Worker : BackgroundService
             }
         };
 
-        await _channel.BasicConsumeAsync(
+        await channel.BasicConsumeAsync(
             queue: _queueName,
             autoAck: false,
             consumer: consumer,
@@ -386,62 +349,9 @@ public sealed class Worker : BackgroundService
         }
     }
 
-    private async Task<IConnection> ConnectWithRetryAsync(
-        ConnectionFactory factory,
-        CancellationToken cancellationToken)
-    {
-        var attempt = 0;
-
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            attempt++;
-
-            try
-            {
-                _logger.LogInformation(
-                    "Connecting to RabbitMQ. Attempt {Attempt}.",
-                    attempt);
-
-                var connection =
-                    await factory.CreateConnectionAsync(cancellationToken);
-
-                _logger.LogInformation(
-                    "Connected to RabbitMQ on attempt {Attempt}.",
-                    attempt);
-
-                return connection;
-            }
-            catch (OperationCanceledException)
-                when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (BrokerUnreachableException exception)
-            {
-                _logger.LogWarning(
-                    exception,
-                    "RabbitMQ is unavailable. Retrying in {DelaySeconds} seconds.",
-                    RabbitMqRetryDelay.TotalSeconds);
-
-                await Task.Delay(
-                    RabbitMqRetryDelay,
-                    cancellationToken);
-            }
-        }
-    }
-
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (_channel is not null)
-        {
-            await _channel.DisposeAsync();
-        }
-
-        if (_connection is not null)
-        {
-            await _connection.DisposeAsync();
-        }
+        await ResetRabbitMqAsync();
 
         await base.StopAsync(cancellationToken);
     }
@@ -536,5 +446,130 @@ public sealed class Worker : BackgroundService
             messageId,
             attempts,
             retryRoutingKey);
+    }
+
+    private async Task ConnectToRabbitMQAsync(CancellationToken stoppingToken)
+    {
+        var factory = new ConnectionFactory
+        {
+            HostName = _rabbitMqOptions.HostName,
+            Port = _rabbitMqOptions.Port,
+            UserName = _rabbitMqOptions.UserName,
+            Password = _rabbitMqOptions.Password,
+            AutomaticRecoveryEnabled = true,
+            TopologyRecoveryEnabled = true,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+            ClientProvidedName = "distributed-workflow-registration-worker",
+            ConsumerDispatchConcurrency = _rabbitMqOptions.ConsumerConcurrency
+        };
+
+        var attempt = 0;
+
+        while (true)
+        {
+            stoppingToken.ThrowIfCancellationRequested();
+            attempt++;
+
+            try
+            {
+                _logger.LogInformation(
+                    "Initializing RabbitMQ consumer. Attempt {Attempt}.",
+                    attempt);
+
+                _connection =
+                    await factory.CreateConnectionAsync(stoppingToken);
+                _channel = await _connection.CreateChannelAsync(
+                    cancellationToken: stoppingToken);
+
+                await _channel.ExchangeDeclareAsync(
+                    exchange: _exchangeName,
+                    type: ExchangeType.Direct,
+                    durable: true,
+                    autoDelete: false,
+                    cancellationToken: stoppingToken);
+
+                await _channel.QueueDeclareAsync(
+                    queue: _queueName,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    cancellationToken: stoppingToken);
+
+                await _channel.QueueBindAsync(
+                    queue: _queueName,
+                    exchange: _exchangeName,
+                    routingKey: _routingKey,
+                    cancellationToken: stoppingToken);
+
+                await _channel.BasicQosAsync(
+                    prefetchSize: 0,
+                    prefetchCount: _rabbitMqOptions.ConsumerConcurrency,
+                    global: false,
+                    cancellationToken: stoppingToken);
+
+                _logger.LogInformation(
+                    "RabbitMQ consumer initialized on attempt {Attempt}.",
+                    attempt);
+
+                return;
+            }
+            catch (OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+                await ResetRabbitMqAsync();
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Failed to initialize RabbitMQ consumer. Retrying in {DelaySeconds} seconds.",
+                    RabbitMqRetryDelay.TotalSeconds);
+
+                await ResetRabbitMqAsync();
+                await Task.Delay(
+                    RabbitMqRetryDelay,
+                    stoppingToken);
+            }
+        }
+    }
+
+    private async Task ResetRabbitMqAsync()
+    {
+        if (_channel is not null)
+        {
+            try
+            {
+                await _channel.DisposeAsync();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(
+                    exception,
+                    "Failed to dispose RabbitMQ consumer channel.");
+            }
+            finally
+            {
+                _channel = null;
+            }
+        }
+
+        if (_connection is not null)
+        {
+            try
+            {
+                await _connection.DisposeAsync();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(
+                    exception,
+                    "Failed to dispose RabbitMQ consumer connection.");
+            }
+            finally
+            {
+                _connection = null;
+            }
+        }
     }
 }
