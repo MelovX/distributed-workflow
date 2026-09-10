@@ -11,9 +11,6 @@ namespace DistributedWorkflow.Worker.Metrics
         public const string NumberingRequestDurationName =
             "worker.numbering.request.duration";
 
-        public const string KafkaPublishDurationName =
-            "worker.kafka.publish.duration";
-
         public const string RabbitMqAcknowledgementDurationName =
             "worker.rabbitmq.acknowledgement.duration";
 
@@ -27,9 +24,6 @@ namespace DistributedWorkflow.Worker.Metrics
 
         public static readonly Histogram<double> NumberingRequestDuration =
             Meter.CreateHistogram<double>(NumberingRequestDurationName, unit: "s");
-
-        public static readonly Histogram<double> KafkaPublishDuration =
-            Meter.CreateHistogram<double>(KafkaPublishDurationName, unit: "s");
 
         public static readonly Histogram<double> RabbitMqAcknowledgementDuration =
             Meter.CreateHistogram<double>(RabbitMqAcknowledgementDurationName, unit: "s");

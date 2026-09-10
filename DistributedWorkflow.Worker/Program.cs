@@ -62,9 +62,6 @@ builder.Services.AddOpenTelemetry()
                 WorkerMetrics.NumberingRequestDurationName,
                 CreateLatencyHistogramConfiguration())
             .AddView(
-                WorkerMetrics.KafkaPublishDurationName,
-                CreateLatencyHistogramConfiguration())
-            .AddView(
                 WorkerMetrics.RabbitMqAcknowledgementDurationName,
                 CreateLatencyHistogramConfiguration())
             .AddHttpClientInstrumentation()
@@ -93,19 +90,7 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<RabbitMqRetryPublisher>();
 
-builder.Services
-    .AddOptions<KafkaOptions>()
-    .Bind(builder.Configuration.GetSection(KafkaOptions.SectionName))
-    .Validate(
-        options => !string.IsNullOrWhiteSpace(options.BootstrapServers),
-        "Kafka:BootstrapServers is required.")
-    .Validate(
-        options => !string.IsNullOrWhiteSpace(options.TopicName),
-        "Kafka:TopicName is required.")
-    .ValidateOnStart();
-
 builder.Services.AddHostedService<Worker>();
-builder.Services.AddSingleton<KafkaDocumentEventPublisher>();
 
 builder.Services.AddGrpcClient<NumberingService.NumberingServiceClient>(
     options =>

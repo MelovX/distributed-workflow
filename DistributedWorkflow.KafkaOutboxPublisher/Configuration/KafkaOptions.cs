@@ -1,4 +1,4 @@
-﻿namespace DistributedWorkflow.Worker.Configuration
+﻿namespace DistributedWorkflow.KafkaOutboxPublisher.Configuration
 {
     public sealed class KafkaOptions
     {

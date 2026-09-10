@@ -1,9 +1,10 @@
-﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 
-namespace DistributedWorkflow.Api.HealthChecks
+namespace DistributedWorkflow.RegistrationStatusUpdater.HealthChecks
 {
-    public class PostgresHealthCheck(NpgsqlDataSource dataSource) : IHealthCheck
+    public sealed class PostgresHealthCheck(
+        NpgsqlDataSource dataSource) : IHealthCheck
     {
         public async Task<HealthCheckResult> CheckHealthAsync(
             HealthCheckContext context,
@@ -17,7 +18,8 @@ namespace DistributedWorkflow.Api.HealthChecks
                 await using var command =
                     new NpgsqlCommand("SELECT 1;", connection);
 
-                var result = await command.ExecuteScalarAsync(cancellationToken);
+                var result =
+                    await command.ExecuteScalarAsync(cancellationToken);
 
                 return result is not null
                     ? HealthCheckResult.Healthy()
@@ -29,9 +31,11 @@ namespace DistributedWorkflow.Api.HealthChecks
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                return HealthCheckResult.Unhealthy(ex.Message, ex);
+                return HealthCheckResult.Unhealthy(
+                    exception.Message,
+                    exception);
             }
         }
     }

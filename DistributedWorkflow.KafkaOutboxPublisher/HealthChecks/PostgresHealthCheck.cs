@@ -1,10 +1,17 @@
 ﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 
-namespace DistributedWorkflow.Api.HealthChecks
+namespace DistributedWorkflow.KafkaOutboxPublisher.HealthChecks
 {
-    public class PostgresHealthCheck(NpgsqlDataSource dataSource) : IHealthCheck
+    public sealed class PostgresHealthCheck : IHealthCheck
     {
+        private readonly NpgsqlDataSource _dataSource;
+
+        public PostgresHealthCheck(NpgsqlDataSource dataSource)
+        {
+            _dataSource = dataSource;
+        }
+
         public async Task<HealthCheckResult> CheckHealthAsync(
             HealthCheckContext context,
             CancellationToken cancellationToken = default)
@@ -12,12 +19,15 @@ namespace DistributedWorkflow.Api.HealthChecks
             try
             {
                 await using var connection =
-                    await dataSource.OpenConnectionAsync(cancellationToken);
+                    await _dataSource.OpenConnectionAsync(
+                        cancellationToken);
 
                 await using var command =
                     new NpgsqlCommand("SELECT 1;", connection);
 
-                var result = await command.ExecuteScalarAsync(cancellationToken);
+                var result =
+                    await command.ExecuteScalarAsync(
+                        cancellationToken);
 
                 return result is not null
                     ? HealthCheckResult.Healthy()
@@ -29,9 +39,11 @@ namespace DistributedWorkflow.Api.HealthChecks
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                return HealthCheckResult.Unhealthy(ex.Message, ex);
+                return HealthCheckResult.Unhealthy(
+                    exception.Message,
+                    exception);
             }
         }
     }

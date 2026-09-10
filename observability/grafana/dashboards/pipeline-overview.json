@@ -51,7 +51,7 @@
       },
     "gridPos": {
       "h": 3,
-      "w": 4,
+      "w": 3,
       "x": 0,
       "y": 0
       },
@@ -127,8 +127,8 @@
       },
     "gridPos": {
       "h": 3,
-      "w": 4,
-      "x": 8,
+      "w": 3,
+      "x": 6,
       "y": 0
       },
       "id": 2,
@@ -203,8 +203,8 @@
     },
     "gridPos": {
       "h": 3,
-      "w": 4,
-      "x": 4,
+      "w": 3,
+      "x": 3,
       "y": 0
     },
     "id": 11,
@@ -234,6 +234,158 @@
       }
     ],
     "title": "Publisher",
+    "type": "stat"
+  },
+  {
+    "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "color": {
+          "mode": "thresholds"
+        },
+        "mappings": [
+          {
+            "options": {
+              "0": {
+                "color": "red",
+                "text": "DOWN"
+              },
+              "1": {
+                "color": "green",
+                "text": "UP"
+              }
+            },
+            "type": "value"
+          }
+        ],
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {
+              "color": "red",
+              "value": null
+            },
+            {
+              "color": "green",
+              "value": 1
+            }
+          ]
+        }
+      },
+      "overrides": []
+    },
+    "gridPos": {
+      "h": 3,
+      "w": 3,
+      "x": 12,
+      "y": 0
+    },
+    "id": 19,
+    "options": {
+      "colorMode": "background",
+      "graphMode": "none",
+      "justifyMode": "center",
+      "orientation": "auto",
+      "reduceOptions": {
+        "calcs": [
+          "lastNotNull"
+        ],
+        "fields": "",
+        "values": false
+      },
+      "textMode": "auto",
+      "wideLayout": true
+    },
+    "targets": [
+      {
+        "editorMode": "code",
+        "expr": "up{job=\"distributed-workflow-kafka-outbox-publisher\"}",
+        "instant": true,
+        "legendFormat": "Kafka Publisher",
+        "range": false,
+        "refId": "A"
+      }
+    ],
+    "title": "Kafka Publisher",
+    "type": "stat"
+  },
+  {
+    "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "color": {
+          "mode": "thresholds"
+        },
+        "mappings": [
+          {
+            "options": {
+              "0": {
+                "color": "red",
+                "text": "DOWN"
+              },
+              "1": {
+                "color": "green",
+                "text": "UP"
+              }
+            },
+            "type": "value"
+          }
+        ],
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {
+              "color": "red",
+              "value": null
+            },
+            {
+              "color": "green",
+              "value": 1
+            }
+          ]
+        }
+      },
+      "overrides": []
+    },
+    "gridPos": {
+      "h": 3,
+      "w": 3,
+      "x": 15,
+      "y": 0
+    },
+    "id": 24,
+    "options": {
+      "colorMode": "background",
+      "graphMode": "none",
+      "justifyMode": "center",
+      "orientation": "auto",
+      "reduceOptions": {
+        "calcs": [
+          "lastNotNull"
+        ],
+        "fields": "",
+        "values": false
+      },
+      "textMode": "auto",
+      "wideLayout": true
+    },
+    "targets": [
+      {
+        "editorMode": "code",
+        "expr": "up{job=\"distributed-workflow-registration-status-updater\"}",
+        "instant": true,
+        "legendFormat": "Status Updater",
+        "range": false,
+        "refId": "A"
+      }
+    ],
+    "title": "Status Updater",
     "type": "stat"
   },
   {
@@ -279,8 +431,8 @@
       },
     "gridPos": {
       "h": 3,
-      "w": 4,
-      "x": 12,
+      "w": 3,
+      "x": 9,
         "y": 0
       },
       "id": 3,
@@ -345,8 +497,8 @@
       },
     "gridPos": {
       "h": 3,
-      "w": 8,
-      "x": 16,
+      "w": 3,
+      "x": 21,
         "y": 0
       },
       "id": 4,
@@ -474,6 +626,20 @@
           "legendFormat": "Worker completed",
           "range": true,
           "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(kafka_outbox_published_total[$__rate_interval]))",
+          "legendFormat": "Kafka published",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(status_updater_operations_updated_total[$__rate_interval]))",
+          "legendFormat": "Status succeeded",
+          "range": true,
+          "refId": "E"
         }
       ],
       "title": "Pipeline Throughput",
@@ -765,17 +931,10 @@
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(worker_kafka_publish_duration_seconds_bucket[$__rate_interval]))) * 1000",
-          "legendFormat": "Kafka p95",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "editorMode": "code",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(worker_rabbitmq_acknowledgement_duration_seconds_bucket[$__rate_interval]))) * 1000",
           "legendFormat": "RabbitMQ ack p95",
           "range": true,
-          "refId": "D"
+          "refId": "C"
         }
       ],
       "title": "Worker Latency Breakdown",
@@ -829,7 +988,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (job) (rate(dotnet_process_cpu_time_seconds_total{job=~\"distributed-workflow-api|distributed-workflow-worker|distributed-workflow-outbox-publisher\"}[$__rate_interval]))",
+          "expr": "sum by (job) (rate(dotnet_process_cpu_time_seconds_total{job=~\"distributed-workflow-api|distributed-workflow-worker|distributed-workflow-outbox-publisher|distributed-workflow-kafka-outbox-publisher|distributed-workflow-registration-status-updater\"}[$__rate_interval]))",
           "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"
@@ -886,7 +1045,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "dotnet_process_memory_working_set_bytes{job=~\"distributed-workflow-api|distributed-workflow-worker|distributed-workflow-outbox-publisher\"}",
+          "expr": "dotnet_process_memory_working_set_bytes{job=~\"distributed-workflow-api|distributed-workflow-worker|distributed-workflow-outbox-publisher|distributed-workflow-kafka-outbox-publisher|distributed-workflow-registration-status-updater\"}",
           "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"
@@ -1342,6 +1501,1122 @@
         }
       ],
       "title": "Outbox Reliability",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(kafka_outbox_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(kafka_outbox_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(kafka_outbox_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Kafka Outbox Batch Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(kafka_outbox_batch_size_sum[$__rate_interval])) / sum(rate(kafka_outbox_batch_size_count[$__rate_interval]))",
+          "legendFormat": "Average",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(kafka_outbox_batch_size_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Kafka Outbox Batch Size",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(kafka_outbox_published_total[$__rate_interval]))",
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Kafka Outbox Throughput by Replica",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(kafka_outbox_failed_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "failed/sec",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(kafka_outbox_ownership_conflicts_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "ownership conflicts/sec",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(kafka_outbox_iteration_errors_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "iteration errors/sec",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Kafka Outbox Reliability",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 72
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(status_updater_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(status_updater_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(status_updater_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Status Updater Batch Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 72
+      },
+      "id": 26,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(status_updater_batch_size_sum[$__rate_interval])) / sum(rate(status_updater_batch_size_count[$__rate_interval]))",
+          "legendFormat": "Average",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(status_updater_batch_size_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Status Updater Batch Size",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "id": 27,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(status_updater_events_consumed_total[$__rate_interval]))",
+          "legendFormat": "{{instance}} consumed",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(status_updater_operations_updated_total[$__rate_interval]))",
+          "legendFormat": "{{instance}} updated",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Status Updater Throughput by Replica",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 80
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(status_updater_operations_unchanged_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "unchanged/sec",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(status_updater_events_invalid_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "invalid/sec",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(status_updater_iteration_errors_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "iteration errors/sec",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Status Updater Reliability",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "DOWN"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 18,
+        "y": 0
+      },
+      "id": 29,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "up{job=\"distributed-workflow-redpanda\"}",
+          "instant": true,
+          "legendFormat": "Kafka",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Kafka",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 88
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(redpanda_cluster_unavailable_partitions)",
+          "instant": true,
+          "legendFormat": "Unavailable",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Kafka Unavailable Partitions",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 88
+      },
+      "id": 31,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(redpanda_kafka_under_replicated_replicas{redpanda_topic=\"document-registered\"})",
+          "instant": true,
+          "legendFormat": "Under-replicated",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Kafka Under-replicated Replicas",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 88
+      },
+      "id": 32,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(1 - redpanda_storage_disk_free_bytes / redpanda_storage_disk_total_bytes) * 100",
+          "instant": true,
+          "legendFormat": "Disk used",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Redpanda Disk Used",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 92
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(redpanda_kafka_records_produced_total{redpanda_topic=\"document-registered\"}[$__rate_interval]))",
+          "legendFormat": "Produced",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(redpanda_kafka_records_fetched_total{redpanda_topic=\"document-registered\"}[$__rate_interval]))",
+          "legendFormat": "Fetched",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Kafka Broker Records",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 92
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(redpanda_kafka_request_latency_seconds_bucket{redpanda_request=\"produce\"}[$__rate_interval]))) * 1000",
+          "legendFormat": "Produce p95",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(redpanda_kafka_request_latency_seconds_bucket{redpanda_request=\"consume\"}[$__rate_interval]))) * 1000",
+          "legendFormat": "Consume p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Kafka Request Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 10000
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 100
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (redpanda_group) (clamp_min(redpanda_kafka_max_offset{redpanda_topic=\"document-registered\"} - on (redpanda_topic, redpanda_partition) group_right redpanda_kafka_consumer_group_committed_offset{redpanda_topic=\"document-registered\"}, 0))",
+          "legendFormat": "{{redpanda_group}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Kafka Consumer Group Lag",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 100
+      },
+      "id": 36,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(redpanda_cpu_busy_seconds_total[$__rate_interval]))",
+          "legendFormat": "Busy CPU cores",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Redpanda CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 100
+      },
+      "id": 37,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(redpanda_memory_allocated_memory)",
+          "legendFormat": "Allocated",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Redpanda Memory",
       "type": "timeseries"
     }
   ],
