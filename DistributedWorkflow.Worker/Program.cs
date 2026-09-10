@@ -38,6 +38,10 @@ builder.Services.AddOpenTelemetry()
     {
         metrics
             .AddMeter(WorkerMetrics.MeterName)
+            .AddMeter("Npgsql")
+            .AddView(
+                "db.client.commands.duration",
+                CreateLatencyHistogramConfiguration())
             .AddView(
                 WorkerMetrics.RegistrationProcessingDurationName,
                 new ExplicitBucketHistogramConfiguration
@@ -122,7 +126,9 @@ static ExplicitBucketHistogramConfiguration CreateLatencyHistogramConfiguration(
             0.100,
             0.250,
             0.500,
-            1.000
+            1.000,
+            2.500,
+            5.000
         ]
     };
 }
