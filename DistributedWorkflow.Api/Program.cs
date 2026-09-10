@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 using OpenTelemetry.Metrics;
-using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -75,22 +74,12 @@ builder.Services.AddOpenTelemetry()
             .AddPrometheusExporter();
     });
 
-var redisConnectionString =
-    builder.Configuration.GetConnectionString("Redis")
-    ?? throw new InvalidOperationException(
-        "Connection string 'Redis' is not configured.");
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
-builder.Services.AddSingleton<IConnectionMultiplexer>(
-    _ => ConnectionMultiplexer.Connect(redisConnectionString));
 
 builder.Services.AddHealthChecks()
     .AddCheck<PostgresHealthCheck>("postgres",
-        failureStatus: HealthStatus.Unhealthy,
-        tags: new[] { "ready" })
-    .AddCheck<RedisHealthCheck>(
-        "redis",
         failureStatus: HealthStatus.Unhealthy,
         tags: new[] { "ready" });
 

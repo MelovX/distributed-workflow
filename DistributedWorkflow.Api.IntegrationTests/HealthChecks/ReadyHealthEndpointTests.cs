@@ -6,17 +6,13 @@ using System.Net;
 namespace DistributedWorkflow.Api.IntegrationTests.HealthChecks
 {
     public sealed class ReadyHealthEndpointsTests 
-        : IClassFixture<PostgresContainerFixture>, 
-          IClassFixture<RedisContainerFixture>
+        : IClassFixture<PostgresContainerFixture>
     {
         private readonly PostgresContainerFixture _postgresFixture;
-        private readonly RedisContainerFixture _redisFixture;
 
-        public ReadyHealthEndpointsTests(PostgresContainerFixture postgresFixture,
-            RedisContainerFixture redisContainerFixture)
+        public ReadyHealthEndpointsTests(PostgresContainerFixture postgresFixture)
         {
             _postgresFixture = postgresFixture;
-            _redisFixture = redisContainerFixture;
         }
 
         [Fact]
@@ -24,8 +20,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.HealthChecks
         {
             // Arrange
             using var factory = new ApiWebApplicationFactory(
-                _postgresFixture.Container.GetConnectionString(),
-                _redisFixture.Container.GetConnectionString());
+                _postgresFixture.Container.GetConnectionString());
 
             using var client = factory.CreateClient();
 
@@ -53,33 +48,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.HealthChecks
             };
 
             using var factory = new ApiWebApplicationFactory(
-                connectionStringBuilder.ConnectionString,
-                _redisFixture.Container.GetConnectionString());
-
-            using var client = factory.CreateClient();
-
-            // Act
-            using var response = await client.GetAsync(
-                "/health/ready",
-                TestContext.Current.CancellationToken);
-
-            var content = await response.Content.ReadAsStringAsync(
-                TestContext.Current.CancellationToken);
-
-            // Assert
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-            Assert.Equal("Unhealthy", content);
-        }
-
-        [Fact]
-        public async Task Ready_WhenRedisIsUnavailable_ReturnsServiceUnavailable()
-        {
-            // Arrange
-            var redisConnectionString = "localhost:1,abortConnect=false,connectTimeout=1000,syncTimeout=1000";
-
-            using var factory = new ApiWebApplicationFactory(
-                _postgresFixture.Container.GetConnectionString(),
-                redisConnectionString);
+                connectionStringBuilder.ConnectionString);
 
             using var client = factory.CreateClient();
 
