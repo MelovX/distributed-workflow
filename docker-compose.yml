@@ -10,6 +10,8 @@ services:
         container_name: distributed-workflow-rabbitmq
         volumes:
             - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+            - ./observability/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+            - ./observability/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
         ports:
             - "5673:5672"
             - "15672:15672"
@@ -50,17 +52,39 @@ services:
             retries: 12
             start_period: 5s
             
+    worker-postgres:
+        image: postgres:16
+        container_name: distributed-workflow-worker-postgres
+        ports:
+            - "5434:5432"
+        environment:
+            POSTGRES_DB: worker_db
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+        volumes:
+            - worker-postgres-data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres -d worker_db"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 5s
+            
     migrations:
         profiles:
             - apps
-        image: distributed-workflow-api:local
+        image: distributed-workflow-migrations:local
+        build:
+            context: .
+            dockerfile: DistributedWorkflow.Migrations/Dockerfile
         container_name: distributed-workflow-migrations
         environment:
-            ASPNETCORE_ENVIRONMENT: Production
-            RunMigrations: "true"
             ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            ConnectionStrings__WorkerDb: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
         depends_on:
             postgres:
+                condition: service_healthy
+            worker-postgres:
                 condition: service_healthy
         restart: "no"
 
@@ -106,19 +130,45 @@ services:
             - "9644:9644"
         volumes:
             - redpanda-data:/var/lib/redpanda/data
+        healthcheck:
+            test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 5s
 
     redpanda-console:
         image: docker.redpanda.com/redpandadata/console:latest
         container_name: distributed-workflow-redpanda-console
         depends_on:
-            - redpanda
+            redpanda:
+                condition: service_healthy
         ports:
             - "8080:8080"
         environment:
             KAFKA_BROKERS: redpanda:9092
             REDPANDA_ADMINAPI_ENABLED: true
             REDPANDA_ADMINAPI_URLS: http://redpanda:9644
-    
+
+    redpanda-init:
+        image: docker.redpanda.com/redpandadata/redpanda:latest
+        entrypoint: ["rpk"]
+        command:
+            - topic
+            - create
+            - document-registered
+            - --partitions
+            - "12"
+            - --replicas
+            - "1"
+            - --if-not-exists
+            - -X
+            - brokers=redpanda:9092
+        depends_on:
+            redpanda:
+                condition: service_healthy
+        restart: "no"
+
     analytics:
         profiles:
             - apps
@@ -156,24 +206,25 @@ services:
         build:
             context: .
             dockerfile: DistributedWorkflow.Worker/Dockerfile
+        deploy:
+            replicas: 4
         environment:
             DOTNET_ENVIRONMENT: Production
             RabbitMq__HostName: rabbitmq
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
-            RabbitMq__ConsumerConcurrency: 24
-            Kafka__BootstrapServers: redpanda:9092
-            Kafka__TopicName: document-registered
+            RabbitMq__ConsumerConcurrency: 16
             NumberingGrpc__Address: http://numbering-grpc:8080
             ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__WorkerDb: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
         depends_on:
             rabbitmq:
                 condition: service_healthy
-            redpanda:
-                condition: service_started
             numbering-grpc:
                 condition: service_started
+            migrations:
+                condition: service_completed_successfully
         restart: unless-stopped
     
     api:
@@ -188,7 +239,7 @@ services:
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
-            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=25;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
             ConnectionStrings__Redis: redis:6379
             RegistrationBatch__MaxBatchSize: 64
             RegistrationBatch__MaxBatchDelay: "00:00:00.005"
@@ -236,6 +287,8 @@ services:
         build:
             context: .
             dockerfile: DistributedWorkflow.OutboxPublisher/Dockerfile
+        deploy:
+            replicas: 2
         environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
@@ -244,7 +297,7 @@ services:
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
-            Outbox__DispatcherCount: 8
+            Outbox__DispatcherCount: 4
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
             interval: 10s
@@ -260,8 +313,74 @@ services:
                 condition: service_healthy
         restart: on-failure
 
+    kafka-outbox-publisher:
+        profiles:
+            - apps
+        image: distributed-workflow-kafka-outbox-publisher:local
+        build:
+            context: .
+            dockerfile: DistributedWorkflow.KafkaOutboxPublisher/Dockerfile
+        deploy:
+            replicas: 2
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__WorkerDb: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            Kafka__BootstrapServers: redpanda:9092
+            Kafka__TopicName: document-registered
+            Outbox__DispatcherCount: 2
+            Outbox__BatchSize: 500
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 20s
+        depends_on:
+            worker-postgres:
+                condition: service_healthy
+            migrations:
+                condition: service_completed_successfully
+            redpanda-init:
+                condition: service_completed_successfully
+        restart: on-failure
+
+    registration-status-updater:
+        profiles:
+            - apps
+        image: distributed-workflow-registration-status-updater:local
+        build:
+            context: .
+            dockerfile: DistributedWorkflow.RegistrationStatusUpdater/Dockerfile
+        deploy:
+            replicas: 2
+        environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: http://+:8080
+            ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+            Kafka__BootstrapServers: redpanda:9092
+            Kafka__TopicName: document-registered
+            Kafka__GroupId: registration-status-updater
+            Kafka__ConsumerCount: 2
+            Kafka__BatchSize: 500
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 20s
+        depends_on:
+            postgres:
+                condition: service_healthy
+            migrations:
+                condition: service_completed_successfully
+            redpanda-init:
+                condition: service_completed_successfully
+        restart: on-failure
+
 volumes:
     postgres-data:
+    worker-postgres-data:
     redpanda-data:
     prometheus-data:
     grafana-data:

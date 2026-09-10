@@ -1,39 +1,38 @@
-using DistributedWorkflow.OutboxPublisher.Data;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Npgsql;
 
 namespace DistributedWorkflow.OutboxPublisher.HealthChecks;
 
 public sealed class PostgresHealthCheck(
-    IServiceScopeFactory scopeFactory) : IHealthCheck
+    NpgsqlDataSource dataSource) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider
-            .GetRequiredService<OutboxDbContext>();
-
         try
         {
-            var canConnect = await dbContext.Database
-                .CanConnectAsync(cancellationToken);
+            await using var connection =
+                await dataSource.OpenConnectionAsync(cancellationToken);
 
-            return canConnect
+            await using var command =
+                new NpgsqlCommand("SELECT 1;", connection);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+
+            return result is not null
                 ? HealthCheckResult.Healthy()
                 : HealthCheckResult.Unhealthy(
-                    "Can't connect to PostgreSQL.");
+                    "PostgreSQL health query returned no result.");
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (Exception exception)
+        catch (Exception ex)
         {
-            return HealthCheckResult.Unhealthy(
-                "PostgreSQL health check failed.",
-                exception);
+            return HealthCheckResult.Unhealthy(ex.Message, ex);
         }
     }
 }

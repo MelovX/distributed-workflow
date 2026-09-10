@@ -1,33 +1,31 @@
-﻿using DistributedWorkflow.Api.Data;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Npgsql;
 
 namespace DistributedWorkflow.Api.HealthChecks
 {
-    public class PostgresHealthCheck : IHealthCheck
+    public class PostgresHealthCheck(NpgsqlDataSource dataSource) : IHealthCheck
     {
-        private readonly IServiceScopeFactory _scopeFactory;
-        public PostgresHealthCheck(IServiceScopeFactory scopeFactory)
+        public async Task<HealthCheckResult> CheckHealthAsync(
+            HealthCheckContext context,
+            CancellationToken cancellationToken = default)
         {
-            _scopeFactory = scopeFactory;
-        }
-
-        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
-        {
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<RegistrationDbContext>();
-
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
+                await using var connection =
+                    await dataSource.OpenConnectionAsync(cancellationToken);
 
-                if (canConnect)
-                {
-                    return HealthCheckResult.Healthy();
-                }
-                return HealthCheckResult.Unhealthy("Can't connect to PostgreSQL.");
+                await using var command =
+                    new NpgsqlCommand("SELECT 1;", connection);
+
+                var result = await command.ExecuteScalarAsync(cancellationToken);
+
+                return result is not null
+                    ? HealthCheckResult.Healthy()
+                    : HealthCheckResult.Unhealthy(
+                        "PostgreSQL health query returned no result.");
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }

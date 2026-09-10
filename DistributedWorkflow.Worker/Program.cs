@@ -1,12 +1,23 @@
 using DistributedWorkflow.Numbering.Grpc;
 using DistributedWorkflow.Worker;
 using DistributedWorkflow.Worker.Configuration;
+using DistributedWorkflow.Worker.Data;
 using DistributedWorkflow.Worker.Metrics;
 using DistributedWorkflow.Worker.Services;
 using Microsoft.AspNetCore.Builder;
+using Npgsql;
 using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var workerDbConnectionString =
+    builder.Configuration.GetConnectionString("WorkerDb")
+    ?? throw new InvalidOperationException(
+        "Connection string 'WorkerDb' is not configured.");
+builder.Services.AddSingleton(
+    _ => NpgsqlDataSource.Create(workerDbConnectionString));
+
+builder.Services.AddSingleton<WorkerInboxStore>();
 
 var numberingGrpcAddressValue =
     builder.Configuration["NumberingGrpc:Address"]
@@ -27,6 +38,10 @@ builder.Services.AddOpenTelemetry()
     {
         metrics
             .AddMeter(WorkerMetrics.MeterName)
+            .AddMeter("Npgsql")
+            .AddView(
+                "db.client.commands.duration",
+                CreateLatencyHistogramConfiguration())
             .AddView(
                 WorkerMetrics.RegistrationProcessingDurationName,
                 new ExplicitBucketHistogramConfiguration
@@ -49,9 +64,6 @@ builder.Services.AddOpenTelemetry()
                 })
             .AddView(
                 WorkerMetrics.NumberingRequestDurationName,
-                CreateLatencyHistogramConfiguration())
-            .AddView(
-                WorkerMetrics.KafkaPublishDurationName,
                 CreateLatencyHistogramConfiguration())
             .AddView(
                 WorkerMetrics.RabbitMqAcknowledgementDurationName,
@@ -80,20 +92,9 @@ builder.Services
         options => options.ConsumerConcurrency > 0,
         "RabbitMq:ConsumerConcurrency must be greater than zero.")
     .ValidateOnStart();
-
-builder.Services
-    .AddOptions<KafkaOptions>()
-    .Bind(builder.Configuration.GetSection(KafkaOptions.SectionName))
-    .Validate(
-        options => !string.IsNullOrWhiteSpace(options.BootstrapServers),
-        "Kafka:BootstrapServers is required.")
-    .Validate(
-        options => !string.IsNullOrWhiteSpace(options.TopicName),
-        "Kafka:TopicName is required.")
-    .ValidateOnStart();
+builder.Services.AddSingleton<RabbitMqRetryPublisher>();
 
 builder.Services.AddHostedService<Worker>();
-builder.Services.AddSingleton<KafkaDocumentEventPublisher>();
 
 builder.Services.AddGrpcClient<NumberingService.NumberingServiceClient>(
     options =>
@@ -125,7 +126,9 @@ static ExplicitBucketHistogramConfiguration CreateLatencyHistogramConfiguration(
             0.100,
             0.250,
             0.500,
-            1.000
+            1.000,
+            2.500,
+            5.000
         ]
     };
 }

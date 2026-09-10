@@ -1,13 +1,11 @@
-using DistributedWorkflow.OutboxPublisher.Data;
 using DistributedWorkflow.OutboxPublisher.Entities;
 using DistributedWorkflow.OutboxPublisher.Metrics;
-using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace DistributedWorkflow.OutboxPublisher.Services;
 
 public sealed class OutboxDispatcher(
-    IServiceScopeFactory scopeFactory,
+    NpgsqlDataSource dataSource,
     RabbitMqOutboxPublisher publisher,
     ILogger<OutboxDispatcher> logger) : BackgroundService
 {
@@ -80,23 +78,15 @@ public sealed class OutboxDispatcher(
     private async Task<ClaimedBatch> ClaimBatchAsync(
         CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider
-            .GetRequiredService<OutboxDbContext>();
+        await using var connection =
+                await dataSource.OpenConnectionAsync(cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var lockUntil = now.Add(LockDuration);
         var lockOwner = $"{_dispatcherId}-{Guid.NewGuid():N}";
 
-        await dbContext.Database.OpenConnectionAsync(cancellationToken);
-
-        try
-        {
-            var connection = (NpgsqlConnection)dbContext.Database
-                .GetDbConnection();
-
-            await using var command = new NpgsqlCommand(
-                """
+        await using var command = new NpgsqlCommand(
+            """
                 WITH candidates AS
                 (
                     SELECT "Id"
@@ -114,35 +104,30 @@ public sealed class OutboxDispatcher(
                 WHERE messages."Id" = candidates."Id"
                 RETURNING messages."Id", messages."Type", messages."Payload";
                 """,
-                connection);
+            connection);
 
-            command.Parameters.AddWithValue("now", now);
-            command.Parameters.AddWithValue("batchSize", BatchSize);
-            command.Parameters.AddWithValue("lockUntil", lockUntil);
-            command.Parameters.AddWithValue("lockOwner", lockOwner);
+        command.Parameters.AddWithValue("now", now);
+        command.Parameters.AddWithValue("batchSize", BatchSize);
+        command.Parameters.AddWithValue("lockUntil", lockUntil);
+        command.Parameters.AddWithValue("lockOwner", lockOwner);
 
-            var publishRequests = new List<OutboxPublishRequest>(BatchSize);
+        var publishRequests = new List<OutboxPublishRequest>(BatchSize);
 
-            await using var reader = await command.ExecuteReaderAsync(
-                cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(
+            cancellationToken);
 
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                publishRequests.Add(
-                    new OutboxPublishRequest(
-                        reader.GetGuid(0),
-                        reader.GetString(1),
-                        reader.GetString(2)));
-            }
-
-            return new ClaimedBatch(
-                lockOwner,
-                publishRequests);
-        }
-        finally
+        while (await reader.ReadAsync(cancellationToken))
         {
-            await dbContext.Database.CloseConnectionAsync();
+            publishRequests.Add(
+                new OutboxPublishRequest(
+                    reader.GetGuid(0),
+                    reader.GetString(1),
+                    reader.GetString(2)));
         }
+
+        return new ClaimedBatch(
+            lockOwner,
+            publishRequests);
     }
 
     private async Task CompleteBatchAsync(
@@ -155,9 +140,8 @@ public sealed class OutboxDispatcher(
             return;
         }
 
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider
-            .GetRequiredService<OutboxDbContext>();
+        await using var connection =
+                await dataSource.OpenConnectionAsync(cancellationToken);
 
         var messageIds = new Guid[publishResults.Count];
         var confirmations = new bool[publishResults.Count];
@@ -176,15 +160,9 @@ public sealed class OutboxDispatcher(
         var publishedAt = DateTimeOffset.UtcNow;
         var updatedMessageIds = new HashSet<Guid>();
 
-        await dbContext.Database.OpenConnectionAsync(cancellationToken);
 
-        try
-        {
-            var connection = (NpgsqlConnection)dbContext.Database
-                .GetDbConnection();
-
-            await using var command = new NpgsqlCommand(
-                """
+        await using var command = new NpgsqlCommand(
+            """
                 UPDATE "OutboxMessages" AS messages
                 SET "PublishedAt" =
                         CASE
@@ -221,27 +199,22 @@ public sealed class OutboxDispatcher(
                   AND messages."LockedBy" = @lockOwner
                 RETURNING messages."Id";
                 """,
-                connection);
+            connection);
 
-            command.Parameters.AddWithValue("publishedAt", publishedAt);
-            command.Parameters.AddWithValue("messageIds", messageIds);
-            command.Parameters.AddWithValue("confirmations", confirmations);
-            command.Parameters.AddWithValue(
-                "failureMessages",
-                failureMessages);
-            command.Parameters.AddWithValue("lockOwner", lockOwner);
+        command.Parameters.AddWithValue("publishedAt", publishedAt);
+        command.Parameters.AddWithValue("messageIds", messageIds);
+        command.Parameters.AddWithValue("confirmations", confirmations);
+        command.Parameters.AddWithValue(
+            "failureMessages",
+            failureMessages);
+        command.Parameters.AddWithValue("lockOwner", lockOwner);
 
-            await using var reader = await command.ExecuteReaderAsync(
-                cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(
+            cancellationToken);
 
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                updatedMessageIds.Add(reader.GetGuid(0));
-            }
-        }
-        finally
+        while (await reader.ReadAsync(cancellationToken))
         {
-            await dbContext.Database.CloseConnectionAsync();
+            updatedMessageIds.Add(reader.GetGuid(0));
         }
 
         var publishedCount = 0;

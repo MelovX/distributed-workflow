@@ -3,8 +3,8 @@ using DistributedWorkflow.Api.Data;
 using DistributedWorkflow.Api.HealthChecks;
 using DistributedWorkflow.Api.Metrics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Npgsql;
 using OpenTelemetry.Metrics;
 using StackExchange.Redis;
 
@@ -15,28 +15,9 @@ var registrationDbConnectionString =
     ?? throw new InvalidOperationException(
         "Connection string 'RegistrationDb' is not configured.");
 
-var runMigrations = string.Equals(
-    builder.Configuration["RunMigrations"],
-    "true",
-    StringComparison.OrdinalIgnoreCase);
-
-if (runMigrations)
-{
-    Console.WriteLine("Applying database migrations...");
-
-    var dbContextOptions =
-        new DbContextOptionsBuilder<RegistrationDbContext>()
-            .UseNpgsql(registrationDbConnectionString)
-            .Options;
-
-    await using var dbContext = new RegistrationDbContext(dbContextOptions);
-
-    await dbContext.Database.MigrateAsync();
-
-    Console.WriteLine("Database migrations applied.");
-
-    return;
-}
+builder.Services.AddSingleton(
+    _ => NpgsqlDataSource.Create(registrationDbConnectionString));
+builder.Services.AddSingleton<RegistrationQueryStore>();
 
 builder.Services
     .AddOptions<RegistrationBatchOptions>()
@@ -103,10 +84,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<IConnectionMultiplexer>(
     _ => ConnectionMultiplexer.Connect(redisConnectionString));
-builder.Services.AddDbContext<RegistrationDbContext>(options =>
-{
-    options.UseNpgsql(registrationDbConnectionString);
-});
+
 builder.Services.AddHealthChecks()
     .AddCheck<PostgresHealthCheck>("postgres",
         failureStatus: HealthStatus.Unhealthy,
@@ -130,12 +108,11 @@ app.UseOpenTelemetryPrometheusScrapingEndpoint();
 app.UseSwagger();
 app.UseSwaggerUI();
 
-//app.UseHttpsRedirection();
 app.MapControllers();
 
 app.Run();
 
 public partial class Program
 {
-    
+
 }

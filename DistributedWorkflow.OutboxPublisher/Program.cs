@@ -1,11 +1,10 @@
 using DistributedWorkflow.OutboxPublisher.Configuration;
-using DistributedWorkflow.OutboxPublisher.Data;
 using DistributedWorkflow.OutboxPublisher.HealthChecks;
 using DistributedWorkflow.OutboxPublisher.Metrics;
 using DistributedWorkflow.OutboxPublisher.Services;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Npgsql;
 using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -79,11 +78,9 @@ var outboxDbConnectionString =
     builder.Configuration.GetConnectionString("OutboxDb")
     ?? throw new InvalidOperationException(
         "Connection string 'OutboxDb' is not configured.");
+builder.Services.AddSingleton(
+    _ => NpgsqlDataSource.Create(outboxDbConnectionString));
 
-builder.Services.AddDbContext<OutboxDbContext>(options =>
-{
-    options.UseNpgsql(outboxDbConnectionString);
-});
 builder.Services
     .AddOptions<RabbitMqOptions>()
     .Bind(builder.Configuration.GetSection(

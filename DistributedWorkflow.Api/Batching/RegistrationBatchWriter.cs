@@ -42,7 +42,8 @@ namespace DistributedWorkflow.Api.Batching
         }
 
         private async Task ProcessBatchAsync(
-                   IReadOnlyList<QueuedRegistrationWrite> batch, CancellationToken stoppingToken)
+            IReadOnlyList<QueuedRegistrationWrite> batch,
+            CancellationToken stoppingToken)
         {
             try
             {
