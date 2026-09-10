@@ -16,17 +16,14 @@ flowchart LR
     api[API]
     worker[Worker]
     numbering[Numbering gRPC]
-    analytics[Analytics]
 
     postgres[(PostgreSQL)]
-    redis[(Redis)]
     rabbitmq[[RabbitMQ]]
     kafka[[Kafka / Redpanda]]
 
     client -->|HTTP: register document| api
 
     api -->|Save operation and outbox message| postgres
-    api -->|Sessions and distributed locks| redis
     api -->|Publish registration command| rabbitmq
 
     rabbitmq -->|Deliver registration command| worker
@@ -34,8 +31,6 @@ flowchart LR
     worker -->|Read and update operation| postgres
     worker -->|gRPC: reserve number| numbering
     worker -->|Publish DocumentRegistered event| kafka
-
-    kafka -->|Consume DocumentRegistered event| analytics
 ```
 
 ## Document registration flow
@@ -52,7 +47,6 @@ sequenceDiagram
     participant Worker
     participant Numbering as Numbering gRPC
     participant Kafka
-    participant Analytics
 
     Client->>API: POST /registrations
     API->>DB: Find operation by Idempotency-Key
@@ -80,7 +74,6 @@ sequenceDiagram
             Worker->>Kafka: Publish DocumentRegisteredEvent
             Kafka-->>Worker: Confirm publication
             Worker->>RabbitMQ: ACK registration command
-            Kafka->>Analytics: Deliver DocumentRegisteredEvent
         end
     end
 ```
@@ -89,26 +82,24 @@ sequenceDiagram
 
 | Service | Responsibility | Communication |
 |---|---|---|
-| `DistributedWorkflow.Api` | Accepts idempotent document registration requests, persists operations and outbox messages, and dispatches pending commands. | HTTP, PostgreSQL, Redis, RabbitMQ |
+| `DistributedWorkflow.Api` | Accepts idempotent document registration requests, persists operations and outbox messages, and dispatches pending commands. | HTTP, PostgreSQL, RabbitMQ |
 | `DistributedWorkflow.Worker` | Consumes registration commands, updates operation status, obtains registration numbers from the Numbering service over gRPC, publishes `DocumentRegisteredEvent` to Kafka, and acknowledges or rejects RabbitMQ deliveries. | RabbitMQ, PostgreSQL, gRPC, Kafka |
 | `DistributedWorkflow.Numbering.Grpc` | Reserves registration numbers using a process-local in-memory counter. | gRPC |
-| `DistributedWorkflow.Analytics` | Consumes `DocumentRegisteredEvent` from Kafka and simulates downstream analytics processing. | Kafka |
 
 ## Infrastructure
 
 | Component | Role |
 |---|---|
 | PostgreSQL | Stores registration operations and transactional outbox messages shared by the API and Worker. |
-| Redis | Stores session data and coordinates distributed locks used by the API; it is not currently part of the document registration flow. |
 | RabbitMQ | Delivers registration commands to Worker. |
-| Redpanda | Provides Kafka-compatible event streaming between the Worker and Analytics service. |
+| Redpanda | Provides Kafka-compatible event streaming between the Worker and StatusUpdater service. |
 | Prometheus | Scrapes and stores metrics exposed by the API through the OpenTelemetry Prometheus exporter. |
 | Grafana | Visualizes Prometheus metrics through configurable dashboards. |
 
 ## Technology stack
 
 - **Platform:** .NET 9, ASP.NET Core, .NET Worker Services
-- **Data access:** PostgreSQL, Entity Framework Core, Npgsql, Redis
+- **Data access:** PostgreSQL, Entity Framework Core, Npgsql
 - **Messaging and communication:** RabbitMQ, Kafka-compatible Redpanda, gRPC
 - **Observability:** OpenTelemetry Metrics, Prometheus, Grafana
 - **Testing:** xUnit v3, Moq, Testcontainers for .NET, `WebApplicationFactory`
@@ -150,7 +141,6 @@ Start each application in a separate terminal, or configure the IDE to launch th
 dotnet run --project DistributedWorkflow.Numbering.Grpc/DistributedWorkflow.Numbering.Grpc.csproj --launch-profile https
 dotnet run --project DistributedWorkflow.Api/DistributedWorkflow.Api.csproj --launch-profile http
 dotnet run --project DistributedWorkflow.Worker/DistributedWorkflow.Worker.csproj
-dotnet run --project DistributedWorkflow.Analytics/DistributedWorkflow.Analytics.csproj
 ```
 
 The applications use the `Development` configuration, which connects to the infrastructure through the host ports defined in `docker-compose.yml`.
@@ -190,7 +180,6 @@ docker compose --profile apps down -v
 | Prometheus | <http://localhost:9090> |
 | Grafana | <http://localhost:3000> |
 | PostgreSQL | `localhost:5433` |
-| Redis | `localhost:6379` |
 | Kafka-compatible endpoint | `localhost:19092` |
 
 ## API usage
@@ -259,8 +248,6 @@ Run the unit tests:
 dotnet test DistributedWorkflow.Api.UnitTests/DistributedWorkflow.Api.UnitTests.csproj
 ```
 
-The unit tests verify the Redis health check behavior for successful responses, failures, and cancellation.
-
 Run the integration tests:
 
 ```bash
@@ -269,13 +256,13 @@ dotnet test DistributedWorkflow.Api.IntegrationTests/DistributedWorkflow.Api.Int
 
 The integration tests cover:
 
-- PostgreSQL and Redis health checks
+- PostgreSQL health check
 - liveness and readiness endpoints
 - registration operation and outbox message persistence
 - sequential idempotent requests
 - concurrent requests with the same idempotency key
 
-The integration tests use Testcontainers to create isolated PostgreSQL and Redis containers. Docker must be running, but the development environment from `docker-compose.yml` is not required.
+The integration tests use Testcontainers to create isolated PostgreSQL container. Docker must be running, but the development environment from `docker-compose.yml` is not required.
 
 ## Observability
 
@@ -306,7 +293,6 @@ The current observability setup covers metrics only. Distributed tracing and cen
 - The Worker marks an operation as `Succeeded` before publishing `DocumentRegisteredEvent` to Kafka. These actions are not atomic, so a Kafka failure can leave a successful operation without its integration event.
 - Failed RabbitMQ deliveries are rejected with `requeue: false`, and no dead-letter exchange is configured. A transient processing failure can therefore discard a registration command permanently.
 - The transactional outbox provides at-least-once publication rather than exactly-once delivery. A failure after publishing to RabbitMQ but before persisting `PublishedAt` can produce duplicate commands, so consumers must remain idempotent.
-- The Analytics service currently logs consumed events but does not build or persist analytical projections.
 - Authentication, authorization, production secret management, and production TLS configuration are outside the current project scope. Credentials in `docker-compose.yml` are intended for local development only.
 
 ## Roadmap
@@ -333,7 +319,6 @@ The current observability setup covers metrics only. Distributed tracing and cen
 ### Architecture and scale
 
 - [ ] Clarify service data ownership and remove direct database sharing where independent ownership provides a concrete benefit.
-- [ ] Turn Analytics into a persistent read model with query endpoints.
 - [ ] Define service-level objectives, run load tests, and identify measured bottlenecks before scaling components independently.
 - [ ] Add horizontal scaling and load balancing for stateless services, then evaluate broker partitioning and database sharding based on observed capacity limits.
 - [ ] Evaluate a Saga only when the workflow includes multiple independently owned stateful services that require compensating actions.

@@ -7,18 +7,15 @@ namespace DistributedWorkflow.Api.IntegrationTests.Factories
         : WebApplicationFactory<Program>
     {
         private readonly string _postgresConnectionString;
-        private readonly string _redisConnectionString;
 
         public ApiWebApplicationFactory()
-            : this("Host=localhost;Port=1;Database=test;Username=test;Password=test", "localhost:1")
+            : this("Host=localhost;Port=1;Database=test;Username=test;Password=test")
         { }
 
         internal ApiWebApplicationFactory(
-            string postgresConnectionString,
-            string redisConnectionString)
+            string postgresConnectionString)
         {
             _postgresConnectionString = postgresConnectionString;
-            _redisConnectionString = redisConnectionString;
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -28,11 +25,6 @@ namespace DistributedWorkflow.Api.IntegrationTests.Factories
             builder.UseSetting(
                 "ConnectionStrings:RegistrationDb",
                 _postgresConnectionString);
-
-            builder.UseSetting(
-                "ConnectionStrings:Redis",
-                _redisConnectionString);
-
         }
     }
 }

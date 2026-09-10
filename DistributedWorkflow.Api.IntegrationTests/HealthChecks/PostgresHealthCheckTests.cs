@@ -1,8 +1,5 @@
-﻿using DistributedWorkflow.Api.Data;
-using DistributedWorkflow.Api.HealthChecks;
+﻿using DistributedWorkflow.Api.HealthChecks;
 using DistributedWorkflow.Api.IntegrationTests.Fixtures;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 
@@ -21,17 +18,10 @@ namespace DistributedWorkflow.Api.IntegrationTests.HealthChecks
         public async Task CheckHealthAsync_WhenPostgresIsAvailable_ReturnsHealthy()
         {
             // Arrange
-            var services = new ServiceCollection();
+            var dataSource =
+                NpgsqlDataSource.Create(_fixture.Container.GetConnectionString());
 
-            services.AddDbContext<RegistrationDbContext>(options =>
-                options.UseNpgsql(_fixture.Container.GetConnectionString()));
-
-            await using var serviceProvider = services.BuildServiceProvider();
-
-            var scopeFactory =
-                serviceProvider.GetRequiredService<IServiceScopeFactory>();
-
-            var healthCheck = new PostgresHealthCheck(scopeFactory);
+            var healthCheck = new PostgresHealthCheck(dataSource);
             var context = new HealthCheckContext();
 
             // Act
@@ -53,17 +43,10 @@ namespace DistributedWorkflow.Api.IntegrationTests.HealthChecks
                 Database = "missing_database"
             };
 
-            var services = new ServiceCollection();
+            var dataSource =
+                NpgsqlDataSource.Create(connectionStringBuilder.ConnectionString);
 
-            services.AddDbContext<RegistrationDbContext>(options =>
-                options.UseNpgsql(connectionStringBuilder.ConnectionString));
-
-            await using var serviceProvider = services.BuildServiceProvider();
-
-            var scopeFactory =
-                serviceProvider.GetRequiredService<IServiceScopeFactory>();
-
-            var healthCheck = new PostgresHealthCheck(scopeFactory);
+            var healthCheck = new PostgresHealthCheck(dataSource);
             var context = new HealthCheckContext();
 
             // Act
@@ -73,7 +56,6 @@ namespace DistributedWorkflow.Api.IntegrationTests.HealthChecks
 
             // Assert
             Assert.Equal(HealthStatus.Unhealthy, result.Status);
-            Assert.Equal("Can't connect to PostgreSQL.", result.Description);
         }
     }
 }

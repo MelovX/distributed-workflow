@@ -1,10 +1,4 @@
 services:
-    redis:
-        image: redis:7
-        container_name: distributed-workflow-redis
-        ports:
-            - "6379:6379"
-
     rabbitmq:
         image: rabbitmq:3-management
         container_name: distributed-workflow-rabbitmq
@@ -168,22 +162,6 @@ services:
             redpanda:
                 condition: service_healthy
         restart: "no"
-
-    analytics:
-        profiles:
-            - apps
-        image: distributed-workflow-analytics:local
-        build:
-            context: .
-            dockerfile: DistributedWorkflow.Analytics/Dockerfile
-        container_name: distributed-workflow-analytics
-        environment:
-            DOTNET_ENVIRONMENT: Production
-            Kafka__BootstrapServers: redpanda:9092
-            Kafka__TopicName: document-registered
-            Kafka__GroupId: analytics-service
-        depends_on:
-            - redpanda
     
     numbering-grpc:
         profiles:
@@ -240,7 +218,6 @@ services:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: http://+:8080
             ConnectionStrings__RegistrationDb: Host=postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
-            ConnectionStrings__Redis: redis:6379
             RegistrationBatch__MaxBatchSize: 64
             RegistrationBatch__MaxBatchDelay: "00:00:00.005"
             RegistrationBatch__Capacity: 20000
@@ -255,8 +232,6 @@ services:
                 condition: service_healthy
             migrations:
                 condition: service_completed_successfully
-            redis:
-                condition: service_started
         restart: on-failure
 
     load-balancer:

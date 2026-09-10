@@ -28,8 +28,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
             var idempotencyKey = Guid.NewGuid().ToString("N");
 
             using var factory = new ApiWebApplicationFactory(
-                _fixture.Container.GetConnectionString(),
-                "localhost:1,abortConnect=false");
+                _fixture.Container.GetConnectionString());
 
             using var client = factory.CreateClient();
 
@@ -115,8 +114,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
             var idempotencyKey = Guid.NewGuid().ToString("N");
 
             using var factory = new ApiWebApplicationFactory(
-                _fixture.Container.GetConnectionString(),
-                "localhost:1,abortConnect=false");
+                _fixture.Container.GetConnectionString());
 
             using var client = factory.CreateClient();
 
@@ -206,8 +204,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
             var idempotencyKey = Guid.NewGuid().ToString("N");
 
             using var factory = new ApiWebApplicationFactory(
-                _fixture.Container.GetConnectionString(),
-                "localhost:1,abortConnect=false");
+                _fixture.Container.GetConnectionString());
 
             using var client = factory.CreateClient();
 
@@ -301,8 +298,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
             const int requestCount = 16;
 
             using var factory = new ApiWebApplicationFactory(
-                _fixture.Container.GetConnectionString(),
-                "localhost:1,abortConnect=false");
+                _fixture.Container.GetConnectionString());
 
             using var client = factory.CreateClient();
 
@@ -419,8 +415,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
         {
             // Arrange
             using var factory = new ApiWebApplicationFactory(
-                _fixture.Container.GetConnectionString(),
-                "localhost:1,abortConnect=false");
+                _fixture.Container.GetConnectionString());
 
             using var client = factory.CreateClient();
 
@@ -465,8 +460,7 @@ namespace DistributedWorkflow.Api.IntegrationTests.Registrations
         {
             // Arrange
             using var factory = new ApiWebApplicationFactory(
-                _fixture.Container.GetConnectionString(),
-                "localhost:1,abortConnect=false");
+                _fixture.Container.GetConnectionString());
 
             using var client = factory.CreateClient();
 
