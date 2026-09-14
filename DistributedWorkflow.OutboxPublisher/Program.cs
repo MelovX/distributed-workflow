@@ -99,6 +99,27 @@ builder.Services
         "RabbitMq:Password is required.")
     .ValidateOnStart();
 
+builder.Services
+    .AddOptions<OutboxOptions>()
+    .Bind(
+        builder.Configuration.GetSection(
+            OutboxOptions.SectionName))
+    .Validate(
+        options =>
+            options.DispatcherCount is > 0 and <= 32,
+        "Outbox:DispatcherCount must be between 1 and 32.")
+    .Validate(
+        options =>
+            options.BatchSize is > 0 and <= 10_000,
+        "Outbox:BatchSize must be between 1 and 10000.")
+    .Validate(
+        options => options.LeaseDuration > TimeSpan.Zero,
+        "Outbox:LeaseDuration must be greater than zero.")
+    .Validate(
+        options => options.EmptyBatchDelay > TimeSpan.Zero,
+        "Outbox:EmptyBatchDelay must be greater than zero.")
+    .ValidateOnStart();
+
 var dispatcherCount = builder.Configuration.GetValue(
     "Outbox:DispatcherCount",
     1);

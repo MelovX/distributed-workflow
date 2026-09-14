@@ -1,39 +1,46 @@
 # Distributed Workflow
 
-## Overview
+Distributed Workflow is an educational .NET system that models a reliable, asynchronous document-registration pipeline. A client submits an idempotent HTTP request, receives an operation identifier, and polls the operation while the command moves through PostgreSQL, RabbitMQ, gRPC, a second transactional outbox, Kafka-compatible Redpanda, and a status projection.
 
-Distributed Workflow is an educational .NET system that models an asynchronous document registration pipeline.
-It demonstrates how an idempotent HTTP request is converted into a durable operation and an outbox command.
-
-The repository provides a hands-on environment for studying distributed-system patterns, containerized infrastructure, observability, and automated testing.
-It is not intended to be a production-ready document management system.
+The project focuses on delivery guarantees, failure recovery, horizontal consumers, database-backed leases, micro-batching, and observable performance.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     client[Client]
-    api[API]
-    worker[Worker]
-    numbering[Numbering gRPC]
-
-    postgres[(PostgreSQL)]
+    lb[HAProxy]
+    api[API replicas]
+    registrationDb[(Registration PostgreSQL)]
+    rabbitOutbox[Outbox Publisher replicas]
     rabbitmq[[RabbitMQ]]
-    kafka[[Kafka / Redpanda]]
+    worker[Worker replicas]
+    numbering[Numbering gRPC]
+    workerDb[(Worker PostgreSQL)]
+    kafkaOutbox[Kafka Outbox Publisher replicas]
+    kafka[[Redpanda / Kafka API]]
+    statusUpdater[Status Updater replicas]
 
-    client -->|HTTP: register document| api
-
-    api -->|Save operation and outbox message| postgres
-    api -->|Publish registration command| rabbitmq
-
-    rabbitmq -->|Deliver registration command| worker
-
-    worker -->|Read and update operation| postgres
-    worker -->|gRPC: reserve number| numbering
-    worker -->|Publish DocumentRegistered event| kafka
+    client -->|HTTP| lb
+    lb --> api
+    api -->|batch: operation + outbox| registrationDb
+    registrationDb -->|claim with lease| rabbitOutbox
+    rabbitOutbox -->|publisher confirms| rabbitmq
+    rabbitmq -->|RegisterDocumentCommand| worker
+    worker -->|ReserveNumber| numbering
+    worker -->|batch: inbox + Kafka outbox| workerDb
+    workerDb -->|claim with lease| kafkaOutbox
+    kafkaOutbox -->|DocumentRegisteredEvent| kafka
+    kafka -->|consumer group| statusUpdater
+    statusUpdater -->|batch status update| registrationDb
 ```
 
-## Document registration flow
+The system uses two PostgreSQL databases with separate responsibilities:
+
+- **Registration DB** stores client-visible operations and the RabbitMQ outbox.
+- **Worker DB** stores the RabbitMQ consumer inbox and the Kafka outbox.
+
+## Registration flow
 
 ```mermaid
 sequenceDiagram
@@ -41,150 +48,180 @@ sequenceDiagram
 
     actor Client
     participant API
-    participant DB as PostgreSQL
-    participant Outbox as Outbox Dispatcher
-    participant RabbitMQ
+    participant RDB as Registration DB
+    participant ROP as RabbitMQ Outbox Publisher
+    participant RMQ as RabbitMQ
     participant Worker
     participant Numbering as Numbering gRPC
-    participant Kafka
+    participant WDB as Worker DB
+    participant KOP as Kafka Outbox Publisher
+    participant Kafka as Redpanda
+    participant Status as Status Updater
 
-    Client->>API: POST /registrations
-    API->>DB: Find operation by Idempotency-Key
+    Client->>API: POST /registrations + Idempotency-Key
+    API->>RDB: Batch insert operation and outbox command
+    RDB-->>API: Commit or return existing idempotent result
+    API-->>Client: 202 Accepted (Pending)
 
-    alt Operation already exists
-        DB-->>API: Existing operation
-        API-->>Client: 202 Accepted with existing OperationId
-    else New operation
-        DB-->>API: Operation not found
-        API->>DB: Insert operation and outbox message
-        DB-->>API: Transaction committed
+    ROP->>RDB: Claim unpublished commands with a lease
+    ROP->>RMQ: Publish batch with confirms
+    ROP->>RDB: Mark confirmed messages as published
 
-        par Return HTTP response
-            API-->>Client: 202 Accepted (Pending)
-        and Process asynchronously
-            Outbox->>DB: Read and lock unpublished outbox messages
-            Outbox->>RabbitMQ: Publish RegisterDocumentCommand
-            Outbox->>DB: Set OutboxMessage.PublishedAt
+    RMQ->>Worker: Deliver RegisterDocumentCommand
+    Worker->>WDB: Batch claim inbox entries
 
-            RabbitMQ->>Worker: Deliver RegisterDocumentCommand
-            Worker->>DB: Set operation status to InProgress
-            Worker->>Numbering: ReserveNumber(OperationId, DocumentId)
-            Numbering-->>Worker: Return reserved number
-            Worker->>DB: Set operation status to Succeeded
-            Worker->>Kafka: Publish DocumentRegisteredEvent
-            Kafka-->>Worker: Confirm publication
-            Worker->>RabbitMQ: ACK registration command
-        end
+    alt Message was already completed
+        Worker->>RMQ: ACK duplicate
+    else Inbox lease acquired
+        Worker->>Numbering: ReserveNumber
+        Numbering-->>Worker: Reserved number
+        Worker->>WDB: Atomically complete inbox and insert Kafka outbox event
+        Worker->>RMQ: ACK command
     end
+
+    KOP->>WDB: Claim unpublished events with a lease
+    KOP->>Kafka: Publish batch and await delivery reports
+    KOP->>WDB: Mark persisted events as published
+
+    Kafka->>Status: Consume event batch
+    Status->>RDB: Batch update Pending operations to Succeeded
+    Status->>Kafka: Commit offsets
 ```
+
+## Reliability model
+
+- The API uses a unique `Idempotency-Key`. Concurrent requests with the same key resolve to the same operation.
+- The API commits `RegistrationOperation` and its RabbitMQ outbox message in one PostgreSQL transaction.
+- RabbitMQ outbox dispatchers use leases and `FOR UPDATE SKIP LOCKED`, allowing multiple dispatchers and replicas to work without intentionally claiming the same row.
+- RabbitMQ publisher confirms are awaited before an outbox row is marked as published.
+- The Worker uses an inbox table to make redelivered commands idempotent. Inbox claims and completions are micro-batched.
+- Completing an inbox message and creating its Kafka outbox event happen atomically in one PostgreSQL statement.
+- Kafka outbox publishers claim batches with leases and wait for Kafka delivery reports before completing a batch in PostgreSQL.
+- The Status Updater uses manual Kafka offset commits and an idempotent `Pending` to `Succeeded` update. A replay after a failed offset commit does not change an already completed operation.
+- Worker failures are republished to delayed RabbitMQ retry queues. The current schedule is 1 second, then 10 seconds, then 60 seconds, with a limit of 10 processing attempts.
+- Invalid messages and commands that exhaust their retry limit are rejected with `requeue: false` and routed to `registration.register.dlq` through the queue's dead-letter exchange.
+
+These mechanisms provide **at-least-once delivery**, not global exactly-once processing. A publisher can still produce a duplicate if the broker persists a message but the process fails before recording that confirmation. Consumers therefore remain idempotent.
 
 ## Services
 
-| Service | Responsibility | Communication |
+| Project | Responsibility | Interfaces |
 |---|---|---|
-| `DistributedWorkflow.Api` | Accepts idempotent document registration requests, persists operations and outbox messages, and dispatches pending commands. | HTTP, PostgreSQL, RabbitMQ |
-| `DistributedWorkflow.Worker` | Consumes registration commands, updates operation status, obtains registration numbers from the Numbering service over gRPC, publishes `DocumentRegisteredEvent` to Kafka, and acknowledges or rejects RabbitMQ deliveries. | RabbitMQ, PostgreSQL, gRPC, Kafka |
-| `DistributedWorkflow.Numbering.Grpc` | Reserves registration numbers using a process-local in-memory counter. | gRPC |
+| `DistributedWorkflow.Api` | Accepts registrations, batches PostgreSQL writes, returns idempotent operation results, and exposes status queries. | HTTP, Registration DB |
+| `DistributedWorkflow.OutboxPublisher` | Claims the Registration DB outbox and publishes confirmed command batches. | Registration DB, RabbitMQ |
+| `DistributedWorkflow.Worker` | Consumes commands, manages inbox leases, calls Numbering, and atomically creates Kafka outbox events. | RabbitMQ, Worker DB, gRPC |
+| `DistributedWorkflow.Numbering.Grpc` | Generates registration numbers using a process-local counter. | gRPC |
+| `DistributedWorkflow.KafkaOutboxPublisher` | Claims Worker DB outbox rows and publishes event batches with Kafka delivery reports. | Worker DB, Kafka API |
+| `DistributedWorkflow.RegistrationStatusUpdater` | Consumes Kafka events in batches and projects successful completion into Registration DB. | Kafka API, Registration DB |
+| `DistributedWorkflow.Migrations` | Applies EF Core migrations to both PostgreSQL databases and exits. | Registration DB, Worker DB |
+| `DistributedWorkflow.LoadTests` | Generates configurable HTTP load with NBomber and writes local reports. | HTTP |
 
 ## Infrastructure
 
 | Component | Role |
 |---|---|
-| PostgreSQL | Stores registration operations and transactional outbox messages shared by the API and Worker. |
-| RabbitMQ | Delivers registration commands to Worker. |
-| Redpanda | Provides Kafka-compatible event streaming between the Worker and StatusUpdater service. |
-| Prometheus | Scrapes and stores metrics exposed by the API through the OpenTelemetry Prometheus exporter. |
-| Grafana | Visualizes Prometheus metrics through configurable dashboards. |
+| HAProxy | Balances HTTP requests across API replicas. |
+| PostgreSQL 16 | Runs independent Registration and Worker database instances. |
+| RabbitMQ | Delivers commands, delayed retries, and dead-lettered failures. |
+| Redpanda | Provides a single-node Kafka-compatible broker for integration events. |
+| Prometheus | Scrapes service, database-client, RabbitMQ, HAProxy, and Redpanda metrics. |
+| Grafana | Provisions the Prometheus data source and the `Pipeline Overview` dashboard. |
 
 ## Technology stack
 
-- **Platform:** .NET 9, ASP.NET Core, .NET Worker Services
-- **Data access:** PostgreSQL, Entity Framework Core, Npgsql
-- **Messaging and communication:** RabbitMQ, Kafka-compatible Redpanda, gRPC
+- **Platform:** .NET 9, ASP.NET Core, Background Services
+- **Data access:** PostgreSQL, Npgsql, Entity Framework Core migrations
+- **Messaging:** RabbitMQ, Kafka-compatible Redpanda
 - **Observability:** OpenTelemetry Metrics, Prometheus, Grafana
-- **Testing:** xUnit v3, Moq, Testcontainers for .NET, `WebApplicationFactory`
-- **Deployment:** Docker, Docker Compose
+- **Testing:** xUnit v3, Moq, Testcontainers for .NET, `WebApplicationFactory`, NBomber
+- **Deployment:** Docker and Docker Compose
 
-## Running locally
+## Quick start
 
 ### Prerequisites
 
-- .NET 9 SDK
 - Docker Desktop with Docker Compose
-- A trusted ASP.NET Core development certificate for the local HTTPS gRPC endpoint
+- .NET 9 SDK for tests and running projects outside containers
 
-Trust the development certificate if necessary:
-
-```bash
-dotnet dev-certs https --trust
-```
-
-### Infrastructure in Docker, applications on the host
-
-This mode is intended for local development and debugging from Visual Studio or another IDE. Docker Compose starts only the infrastructure, while the .NET applications run directly on the host.
-
-Start the infrastructure from the repository root:
-
-```bash
-docker compose up -d
-```
-
-Apply the Entity Framework Core migrations. The API starts in migration mode, updates PostgreSQL, and exits without starting the web server:
-
-```bash
-dotnet run --project DistributedWorkflow.Api/DistributedWorkflow.Api.csproj --launch-profile http -- --RunMigrations=true
-```
-
-Start each application in a separate terminal, or configure the IDE to launch them together:
-
-```bash
-dotnet run --project DistributedWorkflow.Numbering.Grpc/DistributedWorkflow.Numbering.Grpc.csproj --launch-profile https
-dotnet run --project DistributedWorkflow.Api/DistributedWorkflow.Api.csproj --launch-profile http
-dotnet run --project DistributedWorkflow.Worker/DistributedWorkflow.Worker.csproj
-```
-
-The applications use the `Development` configuration, which connects to the infrastructure through the host ports defined in `docker-compose.yml`.
-
-### Fully containerized environment
-
-Use the `apps` profile to build and start both the infrastructure and all .NET applications:
+Build and start the entire environment from the repository root:
 
 ```bash
 docker compose --profile apps up -d --build
 ```
 
-The one-shot `migrations` service applies the database migrations before the API and Worker start.
+Compose waits for both PostgreSQL instances, runs the one-shot migrations container, creates the Kafka topic, and then starts the application services. Check their state with:
 
-Stop and remove the complete environment:
+```bash
+docker compose --profile apps ps --all
+```
+
+The `migrations` and `redpanda-init` containers should finish with exit code `0`. Application services should be running or healthy.
+
+Verify the public API:
+
+```bash
+curl http://localhost:5268/health/ready
+```
+
+Follow the main pipeline logs:
+
+```bash
+docker compose --profile apps logs -f api outbox-publisher worker kafka-outbox-publisher registration-status-updater
+```
+
+Stop the environment while retaining database and broker data:
 
 ```bash
 docker compose --profile apps down
 ```
 
-Add `-v` only when the persisted PostgreSQL and Redpanda data should also be deleted:
+Delete the environment **and all persisted PostgreSQL, Redpanda, Prometheus, and Grafana data** only when a clean state is intended:
 
 ```bash
 docker compose --profile apps down -v
 ```
 
-### Local endpoints
+### Infrastructure-only mode
+
+For debugging applications from an IDE, start only the infrastructure:
+
+```bash
+docker compose up -d
+```
+
+Development settings point application projects to the host ports in the table below. The dedicated migrations project requires both connection strings. For example, in PowerShell:
+
+```powershell
+$env:ConnectionStrings__RegistrationDb = "Host=localhost;Port=5433;Database=registration_db;Username=postgres;Password=postgres"
+$env:ConnectionStrings__WorkerDb = "Host=localhost;Port=5434;Database=worker_db;Username=postgres;Password=postgres"
+
+dotnet run --project DistributedWorkflow.Migrations/DistributedWorkflow.Migrations.csproj
+```
+
+When running the Worker directly, keep `ConnectionStrings__WorkerDb` set in its terminal. The other application projects contain their host-facing development connection settings in `appsettings.Development.json`.
+
+## Local endpoints
 
 | Component | URL or address |
 |---|---|
 | API and Swagger UI | <http://localhost:5268/swagger> |
 | API liveness | <http://localhost:5268/health/live> |
 | API readiness | <http://localhost:5268/health/ready> |
-| Numbering gRPC | `https://localhost:7158` when run on the host; `http://localhost:5082` when run in Docker |
+| HAProxy metrics | <http://localhost:8404/metrics> |
+| Numbering gRPC | `https://localhost:7158` on the host; `http://localhost:5082` through Docker |
+| RabbitMQ AMQP | `localhost:5673` |
 | RabbitMQ Management | <http://localhost:15672> |
+| Redpanda Kafka endpoint | `localhost:19092` |
 | Redpanda Console | <http://localhost:8080> |
+| Redpanda metrics | <http://localhost:9644/public_metrics> |
+| Registration PostgreSQL | `localhost:5433`, database `registration_db` |
+| Worker PostgreSQL | `localhost:5434`, database `worker_db` |
 | Prometheus | <http://localhost:9090> |
 | Grafana | <http://localhost:3000> |
-| PostgreSQL | `localhost:5433` |
-| Kafka-compatible endpoint | `localhost:19092` |
+
+The local RabbitMQ and PostgreSQL credentials are `guest` / `guest` and `postgres` / `postgres`, respectively. Grafana uses `admin` / `admin`. These credentials are for local development only.
 
 ## API usage
-
-The registration API accepts a document and returns an operation identifier immediately. Processing continues asynchronously, so clients use the operation identifier to retrieve the current status.
 
 ### Register a document
 
@@ -199,13 +236,7 @@ Content-Type: application/json
 }
 ```
 
-| Input | Location | Type | Required | Description |
-|---|---|---|---|---|
-| `Idempotency-Key` | Header | string | Yes | Identifies the logical request. Repeating the same key returns the existing operation instead of creating another one. |
-| `documentId` | JSON body | string | Yes | Identifies the document being registered. |
-| `title` | JSON body | string | Yes | Human-readable document title. |
-
-A valid request returns `202 Accepted` because processing has been queued rather than completed:
+The API waits until the operation and outbox command are durably committed, then returns `202 Accepted`:
 
 ```json
 {
@@ -214,11 +245,9 @@ A valid request returns `202 Accepted` because processing has been queued rather
 }
 ```
 
-The API returns `400 Bad Request` when the `Idempotency-Key` header is missing or empty.
+Repeating the request with the same `Idempotency-Key` returns the original operation rather than creating another one. A missing or blank key returns `400 Bad Request`.
 
 ### Get registration status
-
-Use the `operationId` returned by the registration request:
 
 ```http
 GET /registrations/5103c020dff1475c90d1afbdbf9ccd4d
@@ -234,91 +263,195 @@ An existing operation returns `200 OK`:
 }
 ```
 
-The current workflow moves through `Pending`, `InProgress`, and `Succeeded`. An unknown operation identifier returns `404 Not Found`.
+The implemented state transition is `Pending` to `Succeeded`. An unknown operation identifier returns `404 Not Found`.
 
-Runnable examples are available in [`DistributedWorkflow.Api.http`](DistributedWorkflow.Api/DistributedWorkflow.Api.http) and through Swagger UI at <http://localhost:5268/swagger>.
+Runnable examples are available in [`DistributedWorkflow.Api.http`](DistributedWorkflow.Api/DistributedWorkflow.Api.http) and through Swagger UI.
+
+## Configuration reference
+
+ASP.NET Core maps double underscores in Compose environment-variable names to configuration section separators. For example, `WorkerBatch__MaxBatchSize` overrides `WorkerBatch:MaxBatchSize`. Values below are per replica unless stated otherwise.
+
+### Local scale profile
+
+The Compose `apps` profile is tuned as a multi-replica local demonstration. Important defaults currently include:
+
+| Stage | Compose configuration |
+|---|---|
+| API | 3 replicas; registration batches up to 64 with a 5 ms maximum delay |
+| RabbitMQ Outbox Publisher | 2 replicas; 3 dispatchers per replica; batches up to 100 |
+| Worker | 4 replicas; RabbitMQ concurrency 64 per replica; inbox batches up to 32 with a 5 ms maximum delay |
+| Kafka Outbox Publisher | 2 replicas; 2 dispatchers per replica; batches up to 500 |
+| Status Updater | 2 replicas; 2 Kafka consumers per replica; batches up to 500 with a 10 ms maximum delay |
+| Kafka topic | 12 partitions, replication factor 1 |
+
+Batch sizes are upper bounds. A batch is dispatched earlier when its maximum delay expires. Increasing concurrency or replica counts does not guarantee more throughput when every container shares the same CPU, memory, and disk.
+
+### API batching
+
+| Compose parameter | Current value | Description |
+|---|---:|---|
+| `deploy.replicas` | 3 | Number of API containers behind HAProxy. Each replica has its own queue and database pool. |
+| `RegistrationBatch__MaxBatchSize` | 64 | Maximum number of registration requests written in one PostgreSQL transaction. The actual batch can be smaller. |
+| `RegistrationBatch__MaxBatchDelay` | 5 ms | Maximum time to collect more requests after the first request enters an empty batch. Lower values reduce low-load latency; higher values allow fuller batches. |
+| `RegistrationBatch__Capacity` | 20,000 | Maximum number of requests waiting in one API replica's in-memory channel. When full, new writes wait and apply backpressure. |
+
+### RabbitMQ Outbox Publisher
+
+| Compose parameter | Current value | Description |
+|---|---:|---|
+| `deploy.replicas` | 2 | Number of independent publisher processes. |
+| `Outbox__DispatcherCount` | 3 | Concurrent outbox loops inside each replica. The effective maximum is 6 dispatchers across the two replicas. |
+| `Outbox__BatchSize` | 100 | Maximum number of outbox rows claimed and published by one dispatcher iteration. |
+| `Outbox__LeaseDuration` | 20 s | Time for which claimed rows belong to a dispatcher. Another dispatcher can recover them after this lease expires if the owner crashes. It must exceed a normal batch's publish-and-complete time. |
+| `Outbox__EmptyBatchDelay` | 100 ms | Delay before polling PostgreSQL again when no unpublished rows were found. A shorter delay reduces wake-up latency but increases empty database queries. |
+
+### Worker
+
+| Compose parameter | Current value | Description |
+|---|---:|---|
+| `deploy.replicas` | 4 | Number of RabbitMQ consumer processes. |
+| `RabbitMq__ConsumerConcurrency` | 64 | Maximum concurrent RabbitMQ delivery callbacks and the prefetch count for each replica. Across four replicas, up to 256 deliveries can be in flight. |
+| `WorkerBatch__MaxBatchSize` | 32 | Maximum size of each inbox claim batch and each inbox-completion/Kafka-outbox batch. The two pipelines batch independently. |
+| `WorkerBatch__MaxBatchDelay` | 5 ms | Maximum collection window after the first claim or completion request enters a new batch. |
+| `WorkerBatch__Capacity` | 2,048 | Capacity of each in-memory claim and completion channel. When a channel is full, RabbitMQ handlers wait instead of growing memory without a bound. |
+
+### Kafka Outbox Publisher
+
+| Compose parameter | Current value | Description |
+|---|---:|---|
+| `deploy.replicas` | 2 | Number of Kafka outbox publisher processes. |
+| `Outbox__DispatcherCount` | 2 | Concurrent Worker DB outbox loops inside each replica, for an effective maximum of 4 dispatchers. |
+| `Outbox__BatchSize` | 500 | Maximum number of Worker DB outbox rows claimed and submitted to the shared Kafka producer by one iteration. |
+
+The Kafka Outbox Publisher's values not overridden by Compose come from `appsettings.json`: a 30-second lease, a 1-second empty-poll delay, and a 5-second error delay.
+
+### Registration Status Updater
+
+| Compose parameter | Current value | Description |
+|---|---:|---|
+| `deploy.replicas` | 2 | Number of Status Updater processes in the same Kafka consumer group. |
+| `Kafka__ConsumerCount` | 2 | Kafka consumers created inside each replica. There are 4 consumers in total, and Kafka assigns topic partitions among them. |
+| `Kafka__BatchSize` | 500 | Maximum events collected before one set-based PostgreSQL status update and offset commit. |
+| `Kafka__GroupId` | `registration-status-updater` | Consumer-group identity. Replicas sharing this value divide partitions rather than processing every event independently. |
+
+`Kafka:BatchDelay` defaults to 10 ms in `appsettings.json`. The `document-registered` topic has 12 partitions, so one consumer group cannot actively use more than 12 consumers for this topic.
+
+### PostgreSQL connection pools
+
+`Maximum Pool Size` in each connection string is a per-process limit, not a global PostgreSQL limit. API and Worker replicas currently allow up to 20 pooled connections each; publishers and Status Updater replicas allow up to 5 each. The theoretical total therefore grows when replicas are added, even if the observed number of used connections remains much lower.
+
+## Load testing
+
+`DistributedWorkflow.LoadTests` reads its target, injection rate, and steady-state duration from environment variables.
+
+PowerShell example:
+
+```powershell
+$env:LOAD_TEST_BASE_URL = "http://localhost:5268"
+$env:LOAD_TEST_RATE = "5000"
+$env:LOAD_TEST_DURATION_SECONDS = "120"
+
+dotnet run --project DistributedWorkflow.LoadTests/DistributedWorkflow.LoadTests.csproj -c Release
+```
+
+Bash example:
+
+```bash
+LOAD_TEST_BASE_URL=http://localhost:5268 \
+LOAD_TEST_RATE=5000 \
+LOAD_TEST_DURATION_SECONDS=120 \
+dotnet run --project DistributedWorkflow.LoadTests/DistributedWorkflow.LoadTests.csproj -c Release
+```
+
+The scenario ramps to the configured rate for 30 seconds and then maintains that injection rate for the configured duration. NBomber writes HTML, Markdown, CSV, text, and log output under `reports/`.
+
+### Reference result
+
+The following run was recorded on 2026-09-12 with the load generator and all Docker containers sharing one Windows workstation:
+
+| Metric | Result |
+|---|---:|
+| Target steady injection rate | 5,000 requests/second |
+| Ramp | 30 seconds |
+| Steady injection | 120 seconds |
+| Total requests | 672,500 |
+| Accepted | 672,500 |
+| Failed | 0 |
+| Overall RPS including ramp | 4,483.33 |
+| Mean latency | 51.35 ms |
+| p50 / p95 / p99 | 32.83 / 158.85 / 229.38 ms |
+| Maximum latency | 593.54 ms |
+
+This is a local reference measurement, not a universal capacity claim. Hardware, existing table size, PostgreSQL WAL and checkpoint state, Docker resource limits, and whether the load generator shares the application host all affect the result. A repeatable external benchmark over a wired connection is still required before treating this number as a deployment capacity limit.
 
 ## Testing
 
-The repository contains separate unit and integration test projects.
-
-Run the unit tests:
+Run the API batching unit tests:
 
 ```bash
 dotnet test DistributedWorkflow.Api.UnitTests/DistributedWorkflow.Api.UnitTests.csproj
 ```
 
-Run the integration tests:
+Run the API integration tests:
 
 ```bash
 dotnet test DistributedWorkflow.Api.IntegrationTests/DistributedWorkflow.Api.IntegrationTests.csproj
 ```
 
-The integration tests cover:
+The current unit tests cover the bounded registration queue, batch reader, and batch writer behavior. Integration tests use Testcontainers PostgreSQL and cover health checks, operation/outbox persistence, status queries, and sequential and concurrent idempotency scenarios.
 
-- PostgreSQL health check
-- liveness and readiness endpoints
-- registration operation and outbox message persistence
-- sequential idempotent requests
-- concurrent requests with the same idempotency key
-
-The integration tests use Testcontainers to create isolated PostgreSQL container. Docker must be running, but the development environment from `docker-compose.yml` is not required.
+Worker, broker, Kafka, and complete end-to-end failure scenarios do not yet have automated integration coverage.
 
 ## Observability
 
-The API exposes metrics at <http://localhost:5268/metrics> through the OpenTelemetry Prometheus exporter. ASP.NET Core, HTTP client, runtime, and custom application metrics are collected.
+Every application service exposes OpenTelemetry Prometheus metrics on its internal HTTP endpoint. Prometheus discovers individual Compose replicas and scrapes them every five seconds.
 
-The custom metrics include:
+Grafana is provisioned automatically at <http://localhost:3000>. Sign in with `admin` / `admin` and open the `Pipeline Overview` dashboard. It includes:
 
-| Metric | Description |
-|---|---|
-| `registrations.created` | Number of registration operations successfully created. |
-| `outbox.published` | Number of outbox messages successfully published to RabbitMQ. |
-| `outbox.failed` | Number of failed attempts to publish outbox messages. |
+- service and broker health;
+- end-to-end pipeline throughput;
+- RabbitMQ ready and unacknowledged messages;
+- API and Worker latency breakdowns;
+- Registration DB and Worker DB connection-pool and command metrics;
+- per-replica RabbitMQ and Kafka outbox throughput;
+- outbox batch sizes, durations, failures, and lease conflicts;
+- Status Updater throughput and batch metrics;
+- Redpanda produce/fetch rates, request latency, unavailable partitions, CPU, memory, disk usage, and consumer-group lag.
 
-Prometheus scrapes the API metrics endpoint every five seconds. Its query interface is available at <http://localhost:9090>.
-
-Grafana is available at <http://localhost:3000> with the default local credentials `admin` / `admin`. Dashboards are not provisioned automatically. Configure Prometheus as a Grafana data source using the internal Compose address:
-
-```text
-http://prometheus:9090
-```
-
-The current observability setup covers metrics only. Distributed tracing and centralized log aggregation are not implemented yet; application logs are written to the standard console output.
+Application logs are written to standard output and can be read with `docker compose logs`. Distributed tracing, centralized log storage, and alerting are not implemented yet.
 
 ## Known limitations
 
-- The Numbering service uses a process-local in-memory counter. Its state is lost after a restart, and multiple replicas could generate duplicate registration numbers.
-- The API and Worker share the same PostgreSQL database and registration schema, which creates tight coupling and does not provide independent data ownership.
-- The Worker marks an operation as `Succeeded` before publishing `DocumentRegisteredEvent` to Kafka. These actions are not atomic, so a Kafka failure can leave a successful operation without its integration event.
-- Failed RabbitMQ deliveries are rejected with `requeue: false`, and no dead-letter exchange is configured. A transient processing failure can therefore discard a registration command permanently.
-- The transactional outbox provides at-least-once publication rather than exactly-once delivery. A failure after publishing to RabbitMQ but before persisting `PublishedAt` can produce duplicate commands, so consumers must remain idempotent.
-- Authentication, authorization, production secret management, and production TLS configuration are outside the current project scope. Credentials in `docker-compose.yml` are intended for local development only.
+- Numbering uses a process-local, non-idempotent counter. Its state is lost on restart, it cannot be safely scaled to multiple replicas, and a retry after reserving a number can consume another number.
+- The reserved registration number is not yet persisted in the operation or exposed through the status API.
+- An operation that exhausts RabbitMQ retries remains `Pending`; there is no failed-status projection or automated DLQ recovery workflow.
+- Kafka invalid events are logged and skipped, but there is no Kafka dead-letter topic.
+- Completed inbox and outbox records have no retention or archival process, so sustained load grows the tables and their indexes indefinitely.
+- Registration DB updates and Kafka offset commits in Status Updater are not atomic. The current monotonic update is replay-safe, but the service does not provide transactional exactly-once consumption.
+- PostgreSQL, RabbitMQ, Redpanda, and Numbering are single-node development deployments without failover.
+- Message contracts are duplicated between projects instead of being versioned and distributed as shared contracts.
+- Authentication, authorization, secret management, production TLS, distributed tracing, centralized logging, and alerting are outside the current implementation.
 
 ## Roadmap
 
-### Reliability
+### Reliability and domain completion
 
-- [ ] Make the operation status update and Kafka event creation atomic by introducing an outbox for integration events.
-- [ ] Add bounded retries, dead-letter queues, and explicit poison-message handling for RabbitMQ consumers.
-- [ ] Add consumer-side inbox/idempotency guarantees for commands and integration events.
-- [ ] Replace the in-memory numbering counter with persistent, idempotent number allocation.
+- [ ] Persist registration numbers and make Numbering durable and idempotent.
+- [ ] Project terminal failures into an explicit `Failed` operation state and define a DLQ replay procedure.
+- [ ] Add a Kafka dead-letter strategy for invalid events.
+- [ ] Add retention or partitioning for completed inbox and outbox records.
 
 ### Testing and delivery
 
-- [ ] Add Worker integration tests covering RabbitMQ, PostgreSQL, gRPC, and Kafka interactions.
-- [ ] Add end-to-end tests for the complete document registration flow and its failure scenarios.
-- [ ] Add a GitHub Actions pipeline for build, test, and Docker image validation on pull requests.
+- [ ] Add Worker integration tests for inbox leases, retries, duplicate delivery, and atomic Kafka outbox creation.
+- [ ] Add Kafka publisher and Status Updater integration tests.
+- [ ] Add end-to-end tests that interrupt each publish/commit boundary and verify recovery.
+- [ ] Add GitHub Actions for build, tests, and Docker image validation.
 
-### Observability and security
+### Operations and scale
 
-- [ ] Add distributed tracing and correlation identifiers across HTTP, RabbitMQ, gRPC, and Kafka boundaries.
-- [ ] Introduce structured centralized logging, provisioned Grafana dashboards, and actionable alerts.
-- [ ] Add authentication, authorization, secret management, and production-grade transport security.
-
-### Architecture and scale
-
-- [ ] Clarify service data ownership and remove direct database sharing where independent ownership provides a concrete benefit.
-- [ ] Define service-level objectives, run load tests, and identify measured bottlenecks before scaling components independently.
-- [ ] Add horizontal scaling and load balancing for stateless services, then evaluate broker partitioning and database sharding based on observed capacity limits.
-- [ ] Evaluate a Saga only when the workflow includes multiple independently owned stateful services that require compensating actions.
+- [ ] Add distributed tracing and correlation across HTTP, RabbitMQ, gRPC, and Kafka.
+- [ ] Add centralized structured logs, alert rules, and operational runbooks.
+- [ ] Repeat benchmarks with a wired external load generator and document the host specifications and test preconditions.
+- [ ] Evaluate batch or range-based number reservation before scaling Numbering horizontally.
+- [ ] Evaluate multi-node broker and database deployments only after measuring a real deployment bottleneck.
