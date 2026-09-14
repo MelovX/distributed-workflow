@@ -192,7 +192,10 @@ services:
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
-            RabbitMq__ConsumerConcurrency: 16
+            RabbitMq__ConsumerConcurrency: 64
+            WorkerBatch__MaxBatchSize: 32
+            WorkerBatch__MaxBatchDelay: "00:00:00.005"
+            WorkerBatch__Capacity: 2048
             NumberingGrpc__Address: http://numbering-grpc:8080
             ASPNETCORE_URLS: http://+:8080
             ConnectionStrings__WorkerDb: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
@@ -272,7 +275,10 @@ services:
             RabbitMq__Port: 5672
             RabbitMq__UserName: guest
             RabbitMq__Password: guest
-            Outbox__DispatcherCount: 4
+            Outbox__DispatcherCount: 3
+            Outbox__BatchSize: 100
+            Outbox__LeaseDuration: "00:00:20"
+            Outbox__EmptyBatchDelay: "00:00:00.100"
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health/ready"]
             interval: 10s

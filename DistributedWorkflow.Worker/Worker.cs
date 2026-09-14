@@ -29,6 +29,7 @@ public sealed class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly WorkerInboxStore _inboxStore;
     private readonly RabbitMqRetryPublisher _retryPublisher;
+    private readonly WorkerInboxBatcher _inboxBatcher;
 
     private static readonly TimeSpan RabbitMqRetryDelay = TimeSpan.FromSeconds(5);
     private readonly SemaphoreSlim _acknowledgementLock = new(1, 1);
@@ -41,12 +42,14 @@ public sealed class Worker : BackgroundService
         IOptions<RabbitMqOptions> rabbitMqOptions,
         WorkerInboxStore inboxStore,
         RabbitMqRetryPublisher retryPublisher,
+        WorkerInboxBatcher inboxBatcher,
         ILogger<Worker> logger)
     {
         _numberingClient = numberingServiceClient;
         _rabbitMqOptions = rabbitMqOptions.Value;
         _inboxStore = inboxStore;
         _retryPublisher = retryPublisher;
+        _inboxBatcher = inboxBatcher;
         _logger = logger;
     }
 
@@ -100,14 +103,15 @@ public sealed class Worker : BackgroundService
                 claimedMessageId = messageId;
                 lockOwner = Guid.NewGuid().ToString("N");
 
-                var claimStatus = await _inboxStore.ClaimAsync(
-                    messageId,
-                    command.OperationId,
-                    nameof(RegisterDocumentCommand),
-                    lockOwner,
+                var claimResult = await _inboxBatcher.ClaimAsync(
+                    new InboxClaimEntry(
+                        messageId,
+                        command.OperationId,
+                        nameof(RegisterDocumentCommand),
+                        lockOwner),
                     stoppingToken);
 
-                switch (claimStatus)
+                switch (claimResult.Status)
                 {
                     case InboxClaimStatus.AlreadyCompleted:
                         await AcknowledgeAsync(
@@ -175,13 +179,15 @@ public sealed class Worker : BackgroundService
                     command.DocumentId,
                     JsonSerializer.Serialize(documentRegisteredEvent));
 
-                var completed = await _inboxStore.CompleteAndEnqueueAsync(
-                    messageId,
-                    lockOwner,
-                    outboxEntry,
-                    stoppingToken);
+                var completionResult =
+                    await _inboxBatcher.CompleteAndEnqueueAsync(
+                        new InboxCompletionEntry(
+                            messageId,
+                            lockOwner,
+                            outboxEntry),
+                        stoppingToken);
 
-                if (!completed)
+                if (!completionResult.Completed)
                 {
                     _logger.LogWarning(
                         "Inbox lease was lost before completion. MessageId={MessageId}",

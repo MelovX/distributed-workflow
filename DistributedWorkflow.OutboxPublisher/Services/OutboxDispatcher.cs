@@ -1,3 +1,5 @@
+using DistributedWorkflow.OutboxPublisher.Configuration;
+using Microsoft.Extensions.Options;
 using DistributedWorkflow.OutboxPublisher.Entities;
 using DistributedWorkflow.OutboxPublisher.Metrics;
 using Npgsql;
@@ -7,11 +9,17 @@ namespace DistributedWorkflow.OutboxPublisher.Services;
 public sealed class OutboxDispatcher(
     NpgsqlDataSource dataSource,
     RabbitMqOutboxPublisher publisher,
+    IOptions<OutboxOptions> options,
     ILogger<OutboxDispatcher> logger) : BackgroundService
 {
-    private const int BatchSize = 100;
-    private static readonly TimeSpan LockDuration = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan EmptyBatchDelay = TimeSpan.FromSeconds(5);
+    private readonly int _batchSize =
+        options.Value.BatchSize;
+
+    private readonly TimeSpan _leaseDuration =
+        options.Value.LeaseDuration;
+
+    private readonly TimeSpan _emptyBatchDelay =
+        options.Value.EmptyBatchDelay;
 
     private readonly string _dispatcherId =
         $"{Environment.MachineName}-{Guid.NewGuid():N}";
@@ -44,7 +52,7 @@ public sealed class OutboxDispatcher(
 
             if (processedCount == 0)
             {
-                await Task.Delay(EmptyBatchDelay, stoppingToken);
+                await Task.Delay(_emptyBatchDelay, stoppingToken);
             }
         }
     }
@@ -82,7 +90,7 @@ public sealed class OutboxDispatcher(
                 await dataSource.OpenConnectionAsync(cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
-        var lockUntil = now.Add(LockDuration);
+        var lockUntil = now.Add(_leaseDuration);
         var lockOwner = $"{_dispatcherId}-{Guid.NewGuid():N}";
 
         await using var command = new NpgsqlCommand(
@@ -107,11 +115,11 @@ public sealed class OutboxDispatcher(
             connection);
 
         command.Parameters.AddWithValue("now", now);
-        command.Parameters.AddWithValue("batchSize", BatchSize);
+        command.Parameters.AddWithValue("batchSize", _batchSize);
         command.Parameters.AddWithValue("lockUntil", lockUntil);
         command.Parameters.AddWithValue("lockOwner", lockOwner);
 
-        var publishRequests = new List<OutboxPublishRequest>(BatchSize);
+        var publishRequests = new List<OutboxPublishRequest>(_batchSize);
 
         await using var reader = await command.ExecuteReaderAsync(
             cancellationToken);

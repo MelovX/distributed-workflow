@@ -8,7 +8,7 @@ var durationSeconds = ReadPositiveInteger(
     "LOAD_TEST_DURATION_SECONDS",
     defaultValue: 300);
 
-var httpClient = Http.CreateDefaultClient(maxConnectionsPerServer: 512);
+var httpClient = Http.CreateDefaultClient(maxConnectionsPerServer: 1024);
 
 var scenario = Scenario.Create("register_document", async _ =>
 {

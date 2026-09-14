@@ -94,6 +94,28 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<RabbitMqRetryPublisher>();
 
+builder.Services
+    .AddOptions<WorkerBatchOptions>()
+    .Bind(
+        builder.Configuration.GetSection(
+            WorkerBatchOptions.SectionName))
+    .Validate(
+        options => options.MaxBatchSize > 0,
+        "WorkerBatch:MaxBatchSize must be greater than zero.")
+    .Validate(
+        options => options.MaxBatchDelay > TimeSpan.Zero,
+        "WorkerBatch:MaxBatchDelay must be greater than zero.")
+    .Validate(
+        options => options.Capacity >= options.MaxBatchSize,
+        "WorkerBatch:Capacity must be greater than or equal to MaxBatchSize.")
+    .ValidateOnStart();
+
+builder.Services.AddSingleton<WorkerInboxBatcher>();
+
+builder.Services.AddHostedService(
+    serviceProvider =>
+        serviceProvider.GetRequiredService<WorkerInboxBatcher>());
+
 builder.Services.AddHostedService<Worker>();
 
 builder.Services.AddGrpcClient<NumberingService.NumberingServiceClient>(
