@@ -455,3 +455,7 @@ Application logs are written to standard output and can be read with `docker com
 - [ ] Repeat benchmarks with a wired external load generator and document the host specifications and test preconditions.
 - [ ] Evaluate batch or range-based number reservation before scaling Numbering horizontally.
 - [ ] Evaluate multi-node broker and database deployments only after measuring a real deployment bottleneck.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
