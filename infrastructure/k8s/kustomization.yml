@@ -1,6 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+namespace: distributed-workflow
+
 resources:
   - namespace.yml
   - database-settings.yml
@@ -15,3 +17,10 @@ resources:
   - outbox-publisher.yml
   - kafka-outbox-publisher.yml
   - registration-status-updater.yml
+
+configMapGenerator:
+  - name: rabbitmq-config
+    files:
+      - enabled_plugins=rabbitmq/enabled_plugins
+      - rabbitmq.conf=rabbitmq/rabbitmq.conf
+      - definitions.json=rabbitmq/definitions.json

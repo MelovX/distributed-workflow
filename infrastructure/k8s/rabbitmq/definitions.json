@@ -1,0 +1,135 @@
+{
+  "exchanges": [
+    {
+      "name": "registration.commands.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "registration.commands.retry",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "registration.register.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "registration.register.retry.1s",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "registration.register.retry.10s",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "registration.register.retry.60s",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "registration.commands.dlx",
+      "vhost": "/",
+      "destination": "registration.register.dlq",
+      "destination_type": "queue",
+      "routing_key": "registration.register.dead",
+      "arguments": {}
+    },
+    {
+      "source": "registration.commands.retry",
+      "vhost": "/",
+      "destination": "registration.register.retry.1s",
+      "destination_type": "queue",
+      "routing_key": "registration.register.retry.1s",
+      "arguments": {}
+    },
+    {
+      "source": "registration.commands.retry",
+      "vhost": "/",
+      "destination": "registration.register.retry.10s",
+      "destination_type": "queue",
+      "routing_key": "registration.register.retry.10s",
+      "arguments": {}
+    },
+    {
+      "source": "registration.commands.retry",
+      "vhost": "/",
+      "destination": "registration.register.retry.60s",
+      "destination_type": "queue",
+      "routing_key": "registration.register.retry.60s",
+      "arguments": {}
+    }
+  ],
+  "policies": [
+    {
+      "name": "registration-register-dlx",
+      "vhost": "/",
+      "pattern": "^registration\\.register$",
+      "apply-to": "queues",
+      "definition": {
+        "dead-letter-exchange": "registration.commands.dlx",
+        "dead-letter-routing-key": "registration.register.dead"
+      },
+      "priority": 0
+    },
+    {
+      "name": "registration-retry-1s",
+      "vhost": "/",
+      "pattern": "^registration\\.register\\.retry\\.1s$",
+      "apply-to": "queues",
+      "definition": {
+        "message-ttl": 1000,
+        "dead-letter-exchange": "registration.commands",
+        "dead-letter-routing-key": "registration.register"
+      },
+      "priority": 0
+    },
+    {
+      "name": "registration-retry-10s",
+      "vhost": "/",
+      "pattern": "^registration\\.register\\.retry\\.10s$",
+      "apply-to": "queues",
+      "definition": {
+        "message-ttl": 10000,
+        "dead-letter-exchange": "registration.commands",
+        "dead-letter-routing-key": "registration.register"
+      },
+      "priority": 0
+    },
+    {
+      "name": "registration-retry-60s",
+      "vhost": "/",
+      "pattern": "^registration\\.register\\.retry\\.60s$",
+      "apply-to": "queues",
+      "definition": {
+        "message-ttl": 60000,
+        "dead-letter-exchange": "registration.commands",
+        "dead-letter-routing-key": "registration.register"
+      },
+      "priority": 0
+    }
+  ]
+}

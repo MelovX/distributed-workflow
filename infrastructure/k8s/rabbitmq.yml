@@ -18,6 +18,10 @@ spec:
       port: 15672
       targetPort: management
 
+    - name: metrics
+      port: 15692
+      targetPort: metrics
+
 ---
 
 apiVersion: v1
@@ -63,6 +67,9 @@ spec:
             - name: management
               containerPort: 15672
 
+            - name: metrics
+              containerPort: 15692
+
           env:
             - name: RABBITMQ_DEFAULT_USER
               valueFrom:
@@ -93,6 +100,26 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/rabbitmq
+
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
+              readOnly: true
+
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/rabbitmq.conf
+              subPath: rabbitmq.conf
+              readOnly: true
+
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/definitions.json
+              subPath: definitions.json
+              readOnly: true
+
+      volumes:
+        - name: rabbitmq-config
+          configMap:
+            name: rabbitmq-config
 
   volumeClaimTemplates:
     - metadata:
