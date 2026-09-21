@@ -1,0 +1,150 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: outbox-publisher
+  namespace: distributed-workflow
+spec:
+  selector:
+    app: outbox-publisher
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: outbox-publisher-settings
+  namespace: distributed-workflow
+data:
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_URLS: http://+:8080
+  RabbitMq__HostName: rabbitmq
+  RabbitMq__Port: "5672"
+  Outbox__DispatcherCount: "3"
+  Outbox__BatchSize: "100"
+  Outbox__LeaseDuration: "00:00:20"
+  Outbox__EmptyBatchDelay: "00:00:00.100"
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: outbox-publisher
+  namespace: distributed-workflow
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: outbox-publisher
+
+  template:
+    metadata:
+      labels:
+        app: outbox-publisher
+
+    spec:
+      initContainers:
+        - name: wait-for-registration-migrations
+          image: postgres:16
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_PASSWORD
+
+          command:
+            - sh
+            - -c
+
+          args:
+            - |
+              until PGPASSWORD="$POSTGRES_PASSWORD" \
+                psql \
+                  -v ON_ERROR_STOP=1 \
+                  -h registration-postgres \
+                  -U "$POSTGRES_USER" \
+                  -d registration_db \
+                  -c 'SELECT 1 FROM "OutboxMessages" LIMIT 1; SELECT 1 FROM "RegistrationOperations" LIMIT 1;' \
+                  >/dev/null 2>&1;
+              do
+                echo "Waiting for Registration database migrations..."
+                sleep 2
+              done
+
+      containers:
+        - name: outbox-publisher
+          image: distributed-workflow-outbox-publisher:local
+          imagePullPolicy: Never
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          envFrom:
+            - configMapRef:
+                name: outbox-publisher-settings
+
+          env:
+            - name: ConnectionStrings__OutboxDb
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: REGISTRATION_CONNECTION_STRING
+
+            - name: RabbitMq__UserName
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_USER
+
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_PASSWORD
+
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 30
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

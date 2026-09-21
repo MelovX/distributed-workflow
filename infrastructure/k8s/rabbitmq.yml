@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: distributed-workflow
+spec:
+  clusterIP: None
+
+  selector:
+    app: rabbitmq
+
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+
+    - name: management
+      port: 15672
+      targetPort: management
+
+---
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-settings
+  namespace: distributed-workflow
+type: Opaque
+stringData:
+  RABBITMQ_USER: workflow
+  RABBITMQ_PASSWORD: workflow
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: distributed-workflow
+
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: rabbitmq
+
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3-management
+
+          ports:
+            - name: amqp
+              containerPort: 5672
+
+            - name: management
+              containerPort: 15672
+
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_USER
+
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_PASSWORD
+                  
+          startupProbe:
+              tcpSocket:
+                port: amqp
+              periodSeconds: 5
+              timeoutSeconds: 2
+              failureThreshold: 24
+
+          readinessProbe:
+              tcpSocket:
+                port: amqp
+              periodSeconds: 5
+              timeoutSeconds: 2
+              failureThreshold: 3
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

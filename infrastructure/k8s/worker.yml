@@ -1,0 +1,127 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker
+  namespace: distributed-workflow
+spec:
+  selector:
+    app: worker
+  ports:
+    - name: worker
+      port: 8080
+      targetPort: worker
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-settings
+  namespace: distributed-workflow
+data:
+  DOTNET_ENVIRONMENT: Production
+  RabbitMq__HostName: rabbitmq
+  RabbitMq__Port: "5672"
+  RabbitMq__ConsumerConcurrency: "64"
+  WorkerBatch__MaxBatchSize: "32"
+  WorkerBatch__MaxBatchDelay: "00:00:00.005"
+  WorkerBatch__Capacity: "2048"
+  NumberingGrpc__Address: http://numbering-grpc:8080
+  ASPNETCORE_URLS: http://+:8080
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: distributed-workflow
+
+spec:
+  replicas: 4
+
+  selector:
+    matchLabels:
+      app: worker
+
+  template:
+    metadata:
+      labels:
+        app: worker
+
+    spec:
+      initContainers:
+        - name: wait-for-worker-migrations
+          image: postgres:16
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_PASSWORD
+
+          command:
+            - sh
+            - -c
+
+          args:
+            - |
+              until PGPASSWORD="$POSTGRES_PASSWORD" \
+                psql \
+                  -v ON_ERROR_STOP=1 \
+                  -h worker-postgres \
+                  -U "$POSTGRES_USER" \
+                  -d worker_db \
+                  -c 'SELECT 1 FROM "WorkerInboxMessages" LIMIT 1; SELECT 1 FROM "WorkerKafkaOutboxMessages" LIMIT 1;' \
+                  >/dev/null 2>&1;
+              do
+                echo "Waiting for Worker database migrations..."
+                sleep 2
+              done
+
+      containers:
+        - name: worker
+          image: distributed-workflow-worker:local
+          imagePullPolicy: Never
+
+          ports:
+            - name: worker
+              containerPort: 8080
+
+          envFrom:
+            - configMapRef:
+                name: worker-settings
+
+          env:
+            - name: ConnectionStrings__WorkerDb
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: WORKER_CONNECTION_STRING
+
+            - name: RabbitMq__UserName
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_USER
+
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_PASSWORD
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

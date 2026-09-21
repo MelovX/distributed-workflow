@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-migrations
+  namespace: distributed-workflow
+
+spec:
+  backoffLimit: 3
+
+  template:
+    metadata:
+      labels:
+        app: database-migrations
+
+    spec:
+      restartPolicy: Never
+
+      initContainers:
+        - name: wait-for-registration-postgres
+          image: postgres:16
+          command:
+            - sh
+            - -c
+            - until pg_isready -h registration-postgres -U postgres -d registration_db; do sleep 2; done
+
+        - name: wait-for-worker-postgres
+          image: postgres:16
+          command:
+            - sh
+            - -c
+            - until pg_isready -h worker-postgres -U postgres -d worker_db; do sleep 2; done
+
+      containers:
+        - name: migrations
+          image: distributed-workflow-migrations:local
+          imagePullPolicy: Never
+
+          env:
+            - name: ConnectionStrings__RegistrationDb
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: REGISTRATION_CONNECTION_STRING
+
+            - name: ConnectionStrings__WorkerDb
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: WORKER_CONNECTION_STRING

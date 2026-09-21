@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-outbox-publisher
+  namespace: distributed-workflow
+spec:
+  selector:
+    app: kafka-outbox-publisher
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-outbox-publisher-settings
+  namespace: distributed-workflow
+data:
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_URLS: http://+:8080
+  Kafka__BootstrapServers: redpanda:9092
+  Kafka__TopicName: document-registered
+  Outbox__DispatcherCount: "2"
+  Outbox__BatchSize: "500"
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-outbox-publisher
+  namespace: distributed-workflow
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: kafka-outbox-publisher
+
+  template:
+    metadata:
+      labels:
+        app: kafka-outbox-publisher
+
+    spec:
+      initContainers:
+        - name: wait-for-worker-migrations
+          image: postgres:16
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_PASSWORD
+
+          command:
+            - sh
+            - -c
+
+          args:
+            - |
+              until PGPASSWORD="$POSTGRES_PASSWORD" \
+                psql \
+                  -v ON_ERROR_STOP=1 \
+                  -h worker-postgres \
+                  -U "$POSTGRES_USER" \
+                  -d worker_db \
+                  -c 'SELECT 1 FROM "WorkerInboxMessages" LIMIT 1; SELECT 1 FROM "WorkerKafkaOutboxMessages" LIMIT 1;' \
+                  >/dev/null 2>&1;
+              do
+                echo "Waiting for Worker database migrations..."
+                sleep 2
+              done
+              
+        - name: wait-for-kafka-topic
+          image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+
+          command:
+            - sh
+            - -c
+
+          args:
+            - |
+              until rpk topic describe document-registered \
+                -X brokers=redpanda:9092 \
+                >/dev/null 2>&1;
+              do
+                echo "Waiting for Kafka topic document-registered..."
+                sleep 2
+              done
+        
+      containers:
+        - name: kafka-outbox-publisher
+          image: distributed-workflow-kafka-outbox-publisher:local
+          imagePullPolicy: Never
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          envFrom:
+            - configMapRef:
+                name: kafka-outbox-publisher-settings
+
+          env:
+            - name: ConnectionStrings__WorkerDb
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: WORKER_CONNECTION_STRING
+
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 30
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

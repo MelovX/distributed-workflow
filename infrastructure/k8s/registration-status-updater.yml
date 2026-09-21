@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: registration-status-updater
+  namespace: distributed-workflow
+spec:
+  selector:
+    app: registration-status-updater
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registration-status-updater-settings
+  namespace: distributed-workflow
+data:
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_URLS: http://+:8080
+  Kafka__BootstrapServers: redpanda:9092
+  Kafka__TopicName: document-registered
+  Kafka__GroupId: registration-status-updater
+  Kafka__ConsumerCount: "2"
+  Kafka__BatchSize: "500"
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registration-status-updater
+  namespace: distributed-workflow
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: registration-status-updater
+
+  template:
+    metadata:
+      labels:
+        app: registration-status-updater
+
+    spec:
+      initContainers:
+        - name: wait-for-registration-migrations
+          image: postgres:16
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: POSTGRES_PASSWORD
+
+          command:
+            - sh
+            - -c
+
+          args:
+            - |
+              until PGPASSWORD="$POSTGRES_PASSWORD" \
+                psql \
+                  -v ON_ERROR_STOP=1 \
+                  -h registration-postgres \
+                  -U "$POSTGRES_USER" \
+                  -d registration_db \
+                  -c 'SELECT 1 FROM "OutboxMessages" LIMIT 1; SELECT 1 FROM "RegistrationOperations" LIMIT 1;' \
+                  >/dev/null 2>&1;
+              do
+                echo "Waiting for Registration database migrations..."
+                sleep 2
+              done
+              
+        - name: wait-for-kafka-topic
+          image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+
+          command:
+            - sh
+            - -c
+
+          args:
+            - |
+              until rpk topic describe document-registered \
+                -X brokers=redpanda:9092 \
+                >/dev/null 2>&1;
+              do
+                echo "Waiting for Kafka topic document-registered..."
+                sleep 2
+              done
+        
+      containers:
+        - name: registration-status-updater
+          image: distributed-workflow-registration-status-updater:local
+          imagePullPolicy: Never
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          envFrom:
+            - configMapRef:
+                name: registration-status-updater-settings
+
+          env:
+            - name: ConnectionStrings__RegistrationDb
+              valueFrom:
+                secretKeyRef:
+                  name: database-settings
+                  key: REGISTRATION_CONNECTION_STRING
+
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 30
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

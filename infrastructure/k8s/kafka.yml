@@ -1,0 +1,231 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  namespace: distributed-workflow
+spec:
+  clusterIP: None
+  selector:
+    app: redpanda
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+
+    - name: admin
+      port: 9644
+      targetPort: admin
+  
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+  namespace: distributed-workflow
+spec:
+  serviceName: redpanda
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: redpanda
+
+  template:
+    metadata:
+      labels:
+        app: redpanda
+
+    spec:
+      containers:
+        - name: redpanda
+          image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+
+          args:
+            - redpanda
+            - start
+            - --kafka-addr
+            - internal://0.0.0.0:9092
+            - --advertise-kafka-addr
+            - internal://redpanda-0.redpanda:9092
+            - --mode
+            - dev-container
+            - --smp
+            - "1"
+
+          ports:
+            - name: kafka
+              containerPort: 9092
+
+            - name: admin
+              containerPort: 9644
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+
+          startupProbe:
+            exec:
+              command:
+                - rpk
+                - cluster
+                - health
+                - --exit-when-healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+
+          readinessProbe:
+            exec:
+              command:
+                - rpk
+                - cluster
+                - health
+                - --exit-when-healthy
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda-console
+  namespace: distributed-workflow
+spec:
+  selector:
+    app: redpanda-console
+
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  
+---
+ 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redpanda-console-settings
+  namespace: distributed-workflow
+data:
+  KAFKA_BROKERS: redpanda:9092
+  REDPANDA_ADMINAPI_ENABLED: "true"
+  REDPANDA_ADMINAPI_URLS: http://redpanda:9644
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda-console
+  namespace: distributed-workflow
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: redpanda-console
+
+  template:
+    metadata:
+      labels:
+        app: redpanda-console
+
+    spec:
+      initContainers:
+        - name: wait-for-redpanda
+          image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              until rpk cluster info -X brokers=redpanda:9092; do
+                echo "Waiting for Redpanda..."
+                sleep 2
+              done
+
+      containers:
+        - name: redpanda-console
+          image: docker.redpanda.com/redpandadata/console:v3.12.0
+
+          envFrom:
+            - configMapRef:
+                name: redpanda-console-settings
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 24
+
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+---
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redpanda-init
+  namespace: distributed-workflow
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app: redpanda-init
+    spec:
+      restartPolicy: Never
+
+      initContainers:
+        - name: wait-for-redpanda
+          image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              until rpk cluster info -X brokers=redpanda:9092; do
+                echo "Waiting for Redpanda..."
+                sleep 2
+              done
+
+      containers:
+        - name: create-topic
+          image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+          command:
+            - rpk
+          args:
+            - topic
+            - create
+            - document-registered
+            - --partitions
+            - "12"
+            - --replicas
+            - "1"
+            - --if-not-exists
+            - -X
+            - brokers=redpanda:9092
