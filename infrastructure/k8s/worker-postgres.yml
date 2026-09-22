@@ -65,7 +65,9 @@ spec:
                 - pg_isready -U "$POSTGRES_USER" -d worker_db
             initialDelaySeconds: 5
             periodSeconds: 5
-
+            timeoutSeconds: 5
+            failureThreshold: 3
+  
           livenessProbe:
             exec:
               command:
@@ -74,7 +76,9 @@ spec:
                 - pg_isready -U "$POSTGRES_USER" -d worker_db
             initialDelaySeconds: 20
             periodSeconds: 10
-
+            timeoutSeconds: 5
+            failureThreshold: 6
+            
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data

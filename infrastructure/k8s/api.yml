@@ -68,7 +68,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: database-settings
-                  key: REGISTRATION_CONNECTION_STRING
+                  key: REGISTRATION_API_CONNECTION_STRING
 
           startupProbe:
             httpGet:

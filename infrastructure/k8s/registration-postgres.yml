@@ -37,6 +37,17 @@ spec:
         - name: postgres
           image: postgres:16
 
+          args:
+            - postgres
+            - -c
+            - shared_buffers=1GB
+            - -c
+            - checkpoint_timeout=15min
+            - -c
+            - checkpoint_completion_target=0.9
+            - -c
+            - wal_buffers=16MB
+
           ports:
             - name: postgres
               containerPort: 5432
@@ -65,6 +76,8 @@ spec:
                 - pg_isready -U "$POSTGRES_USER" -d registration_db
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
 
           livenessProbe:
             exec:
@@ -74,6 +87,8 @@ spec:
                 - pg_isready -U "$POSTGRES_USER" -d registration_db
             initialDelaySeconds: 20
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
 
           volumeMounts:
             - name: data

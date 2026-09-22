@@ -104,7 +104,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: database-settings
-                  key: WORKER_CONNECTION_STRING
+                  key: WORKER_PROCESSOR_CONNECTION_STRING
 
             - name: RabbitMq__UserName
               valueFrom:

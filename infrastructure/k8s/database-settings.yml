@@ -7,5 +7,14 @@ type: Opaque
 stringData:
   POSTGRES_USER: postgres
   POSTGRES_PASSWORD: postgres
-  REGISTRATION_CONNECTION_STRING: Host=registration-postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Timeout=5
-  WORKER_CONNECTION_STRING: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Timeout=5
+
+  REGISTRATION_CONNECTION_STRING: Host=registration-postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+  WORKER_CONNECTION_STRING: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+
+  REGISTRATION_API_CONNECTION_STRING: Host=registration-postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+
+  REGISTRATION_BACKGROUND_CONNECTION_STRING: Host=registration-postgres;Port=5432;Database=registration_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+
+  WORKER_PROCESSOR_CONNECTION_STRING: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=20;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5
+
+  WORKER_BACKGROUND_CONNECTION_STRING: Host=worker-postgres;Port=5432;Database=worker_db;Username=postgres;Password=postgres;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=60;Connection Pruning Interval=10;Timeout=5

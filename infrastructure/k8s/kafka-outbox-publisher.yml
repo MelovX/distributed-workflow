@@ -118,7 +118,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: database-settings
-                  key: WORKER_CONNECTION_STRING
+                  key: WORKER_BACKGROUND_CONNECTION_STRING
 
           startupProbe:
             httpGet:
