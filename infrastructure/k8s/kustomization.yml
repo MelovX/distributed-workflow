@@ -17,6 +17,7 @@ resources:
   - outbox-publisher.yml
   - kafka-outbox-publisher.yml
   - registration-status-updater.yml
+  - ingress.yml
 
 configMapGenerator:
   - name: rabbitmq-config

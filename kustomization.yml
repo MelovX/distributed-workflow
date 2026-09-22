@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: distributed-workflow
+
+resources:
+  - infrastructure/k8s
+  - infrastructure/k8s/prometheus.yml
+  - infrastructure/k8s/grafana.yml
+
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml=observability/prometheus-kubernetes.yml
+
+  - name: grafana-datasources
+    files:
+      - prometheus.yml=observability/grafana/provisioning/datasources/prometheus.yml
+
+  - name: grafana-dashboard-provider
+    files:
+      - distributed-workflow.yml=observability/grafana/provisioning/dashboards/distributed-workflow.yml
+
+  - name: grafana-dashboards
+    files:
+      - pipeline-overview.json=observability/grafana/dashboards/pipeline-overview.json

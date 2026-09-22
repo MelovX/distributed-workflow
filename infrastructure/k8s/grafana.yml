@@ -1,0 +1,156 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-settings
+type: Opaque
+stringData:
+  ADMIN_USER: admin
+  ADMIN_PASSWORD: workflow
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: grafana
+spec:
+  serviceName: grafana-headless
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: grafana
+
+  template:
+    metadata:
+      labels:
+        app: grafana
+
+    spec:
+      securityContext:
+        fsGroup: 472
+        fsGroupChangePolicy: OnRootMismatch
+
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.2.2
+
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-settings
+                  key: ADMIN_USER
+
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-settings
+                  key: ADMIN_PASSWORD
+
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+
+          ports:
+            - name: http
+              containerPort: 3000
+
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-headless
+spec:
+  clusterIP: None
+
+  selector:
+    app: grafana
+
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector:
+    app: grafana
+
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
