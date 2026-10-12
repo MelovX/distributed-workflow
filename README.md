@@ -134,7 +134,7 @@ These mechanisms provide **at-least-once delivery**, not global exactly-once pro
 - **Messaging:** RabbitMQ, Kafka-compatible Redpanda
 - **Observability:** OpenTelemetry Metrics, Prometheus, Grafana
 - **Testing:** xUnit v3, Moq, Testcontainers for .NET, `WebApplicationFactory`, NBomber
-- **Deployment:** Docker and Docker Compose
+- **Deployment:** Docker, Docker Compose, Kubernetes, Kustomize
 
 ## Quick start
 
@@ -199,6 +199,165 @@ dotnet run --project DistributedWorkflow.Migrations/DistributedWorkflow.Migratio
 ```
 
 When running the Worker directly, keep `ConnectionStrings__WorkerDb` set in its terminal. The other application projects contain their host-facing development connection settings in `appsettings.Development.json`.
+
+## Kubernetes deployment with Minikube
+
+The Kubernetes manifests are intended for local deployment from the repository root. They create the `distributed-workflow` namespace and deploy the application services, two PostgreSQL instances, RabbitMQ, Redpanda, Prometheus, Grafana, database migrations, and Kafka topic initialization.
+
+### Prerequisites
+
+- Docker Desktop
+- Minikube
+- `kubectl` with Kustomize support
+
+Start a Minikube cluster and enable the Traefik ingress controller referenced by `infrastructure/k8s/ingress.yml`. The resource values below match the verified local profile; allocate more CPU and memory for heavier load tests:
+
+```powershell
+minikube start --driver=docker --cpus=2 --memory=8000
+minikube addons enable traefik
+```
+
+Build the application images locally:
+
+```powershell
+docker compose --profile apps build
+docker build --tag distributed-workflow-load-tests:local --file DistributedWorkflow.LoadTests/Dockerfile .
+```
+
+Load the images used by Kubernetes into Minikube. The manifests use `imagePullPolicy: Never`, so every `:local` image must exist inside the Minikube node:
+
+```powershell
+$images = @(
+    "distributed-workflow-api:local",
+    "distributed-workflow-migrations:local",
+    "distributed-workflow-numbering-grpc:local",
+    "distributed-workflow-worker:local",
+    "distributed-workflow-outbox-publisher:local",
+    "distributed-workflow-kafka-outbox-publisher:local",
+    "distributed-workflow-registration-status-updater:local",
+    "distributed-workflow-load-tests:local"
+)
+
+$images | ForEach-Object { minikube image load $_ }
+```
+
+Render the manifests locally to catch Kustomize errors, then deploy them:
+
+```powershell
+kubectl kustomize . > $null
+kubectl apply -k .
+```
+
+Wait for the one-shot initialization jobs and application workloads:
+
+```powershell
+kubectl wait --namespace distributed-workflow --for=condition=complete job/database-migrations --timeout=300s
+kubectl wait --namespace distributed-workflow --for=condition=complete job/redpanda-init --timeout=300s
+kubectl wait --namespace distributed-workflow --for=condition=available deployment --all --timeout=300s
+kubectl rollout status --namespace distributed-workflow statefulset/registration-postgres --timeout=300s
+kubectl rollout status --namespace distributed-workflow statefulset/worker-postgres --timeout=300s
+kubectl rollout status --namespace distributed-workflow statefulset/rabbitmq --timeout=300s
+kubectl rollout status --namespace distributed-workflow statefulset/redpanda --timeout=300s
+kubectl rollout status --namespace distributed-workflow statefulset/prometheus --timeout=300s
+kubectl rollout status --namespace distributed-workflow statefulset/grafana --timeout=300s
+kubectl get pods --namespace distributed-workflow
+```
+
+The two jobs should be `Completed`, and all long-running pods should be `Running` and ready. If a workload does not start, inspect its logs and recent namespace events:
+
+```powershell
+kubectl logs --namespace distributed-workflow job/database-migrations
+kubectl logs --namespace distributed-workflow job/redpanda-init
+kubectl get events --namespace distributed-workflow --sort-by='.lastTimestamp'
+```
+
+### Access from the host
+
+Run each required port-forward in a separate terminal. The following command exposes the API at <http://localhost:5268/swagger>:
+
+```powershell
+kubectl port-forward --namespace distributed-workflow service/api 5268:80
+```
+
+Verify its readiness from another terminal:
+
+```powershell
+curl.exe http://localhost:5268/health/ready
+```
+
+Use the same approach for the operational interfaces:
+
+```powershell
+# Grafana: http://localhost:3000 (admin / admin)
+kubectl port-forward --namespace distributed-workflow service/grafana 3000:3000
+
+# Prometheus: http://localhost:9090
+kubectl port-forward --namespace distributed-workflow service/prometheus 9090:9090
+
+# RabbitMQ Management: http://localhost:15672 (guest / guest)
+kubectl port-forward --namespace distributed-workflow service/rabbitmq 15672:15672
+
+# Redpanda Console: http://localhost:8080
+kubectl port-forward --namespace distributed-workflow service/redpanda-console 8080:8080
+```
+
+### In-cluster load test
+
+Run the NBomber load generator inside Kubernetes so that traffic does not depend on host port forwarding:
+
+```powershell
+kubectl delete pod load-test --namespace distributed-workflow --ignore-not-found
+
+kubectl run load-test `
+    --namespace distributed-workflow `
+    --image=distributed-workflow-load-tests:local `
+    --image-pull-policy=Never `
+    --restart=Never `
+    --env=LOAD_TEST_BASE_URL=http://api `
+    --env=LOAD_TEST_RATE=5000 `
+    --env=LOAD_TEST_DURATION_SECONDS=120
+
+kubectl logs --namespace distributed-workflow --follow pod/load-test
+```
+
+Change `LOAD_TEST_RATE` and `LOAD_TEST_DURATION_SECONDS` to match the available hardware. Delete the completed pod before starting another run with the same name.
+
+### Deploy updated application images
+
+After changing application code, rebuild the affected image, load it into Minikube, and restart its Kubernetes workload. For example, to update the API:
+
+```powershell
+docker compose --profile apps build api
+minikube image load distributed-workflow-api:local --overwrite
+kubectl rollout restart --namespace distributed-workflow deployment/api
+kubectl rollout status --namespace distributed-workflow deployment/api --timeout=300s
+```
+
+Reapply the Kustomize configuration after changing any manifest or generated monitoring configuration:
+
+```powershell
+kubectl apply -k .
+```
+
+### Stop or remove the environment
+
+Stop Minikube while retaining the cluster and its data:
+
+```powershell
+minikube stop
+```
+
+Remove the project namespace and all project data, including its persistent volume claims:
+
+```powershell
+kubectl delete -k .
+```
+
+Delete the entire Minikube cluster and all data stored in it only when a clean environment is intended:
+
+```powershell
+minikube delete
+```
 
 ## Local endpoints
 
