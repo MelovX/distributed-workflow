@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: distributed-workflow
+spec:
+  clusterIP: None
+
+  selector:
+    app: rabbitmq
+
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+
+    - name: management
+      port: 15672
+      targetPort: management
+
+    - name: metrics
+      port: 15692
+      targetPort: metrics
+
+---
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-settings
+  namespace: distributed-workflow
+type: Opaque
+stringData:
+  RABBITMQ_USER: workflow
+  RABBITMQ_PASSWORD: workflow
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: distributed-workflow
+
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: rabbitmq
+
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3-management
+
+          ports:
+            - name: amqp
+              containerPort: 5672
+
+            - name: management
+              containerPort: 15672
+
+            - name: metrics
+              containerPort: 15692
+
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_USER
+
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-settings
+                  key: RABBITMQ_PASSWORD
+                  
+          startupProbe:
+              tcpSocket:
+                port: amqp
+              periodSeconds: 5
+              timeoutSeconds: 2
+              failureThreshold: 24
+
+          readinessProbe:
+              tcpSocket:
+                port: amqp
+              periodSeconds: 5
+              timeoutSeconds: 2
+              failureThreshold: 3
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
+              readOnly: true
+
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/rabbitmq.conf
+              subPath: rabbitmq.conf
+              readOnly: true
+
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/definitions.json
+              subPath: definitions.json
+              readOnly: true
+
+      volumes:
+        - name: rabbitmq-config
+          configMap:
+            name: rabbitmq-config
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

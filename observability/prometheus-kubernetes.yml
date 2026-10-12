@@ -1,0 +1,117 @@
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  - job_name: distributed-workflow-api
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - distributed-workflow
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: api
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: http
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+
+  - job_name: distributed-workflow-worker
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - distributed-workflow
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: worker
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: worker
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+
+  - job_name: distributed-workflow-outbox-publisher
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - distributed-workflow
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: outbox-publisher
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: http
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+
+  - job_name: distributed-workflow-rabbitmq
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    static_configs:
+      - targets:
+          - rabbitmq:15692
+
+  - job_name: distributed-workflow-kafka-outbox-publisher
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - distributed-workflow
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: kafka-outbox-publisher
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: http
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+
+  - job_name: distributed-workflow-registration-status-updater
+    metric_name_validation_scheme: legacy
+    metric_name_escaping_scheme: underscores
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - distributed-workflow
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: registration-status-updater
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: http
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+
+  - job_name: distributed-workflow-redpanda
+    metrics_path: /public_metrics
+    static_configs:
+      - targets:
+          - redpanda:9644
